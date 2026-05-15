@@ -76,9 +76,7 @@ class EventBus:
         await self.publish(payload)
 
 
-async def session_monitor_listener(
-    bus: EventBus, msg: NewMessage
-) -> None:
+async def session_monitor_listener(bus: EventBus, msg: NewMessage) -> None:
     """Adapter passed to `SessionMonitor.add_listener`."""
     # Lazy import to avoid circular import with bot.py.
     from ..session import session_manager

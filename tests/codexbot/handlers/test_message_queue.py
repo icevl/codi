@@ -318,7 +318,9 @@ class TestMessageQueueCompletionOrdering:
         await mq.shutdown_workers()
 
     @pytest.mark.asyncio
-    async def test_completion_retry_reorders_after_content_and_preserves_order(self) -> None:
+    async def test_completion_retry_reorders_after_content_and_preserves_order(
+        self,
+    ) -> None:
         await mq.shutdown_workers()
         mq._tool_msg_ids.clear()
         mq._status_msg_info.clear()
@@ -418,7 +420,10 @@ class TestMessageQueueCompletionOrdering:
                 new_callable=AsyncMock,
                 return_value=None,
             ),
-            patch("codexbot.handlers.message_queue._check_and_send_status", new_callable=AsyncMock),
+            patch(
+                "codexbot.handlers.message_queue._check_and_send_status",
+                new_callable=AsyncMock,
+            ),
             patch("asyncio.sleep", new=AsyncMock()),
         ):
             await enqueue_completion_message(
@@ -437,7 +442,9 @@ class TestMessageQueueCompletionOrdering:
         await mq.shutdown_workers()
 
     @pytest.mark.asyncio
-    async def test_completion_retry_does_not_duplicate_after_post_send_error(self) -> None:
+    async def test_completion_retry_does_not_duplicate_after_post_send_error(
+        self,
+    ) -> None:
         await mq.shutdown_workers()
         mq._tool_msg_ids.clear()
         mq._status_msg_info.clear()
@@ -531,7 +538,9 @@ class TestMessageQueueCompletionOrdering:
         await mq.shutdown_workers()
 
     @pytest.mark.asyncio
-    async def test_thread_queues_are_isolated_and_do_not_merge_across_threads(self) -> None:
+    async def test_thread_queues_are_isolated_and_do_not_merge_across_threads(
+        self,
+    ) -> None:
         await mq.shutdown_workers()
         mq._tool_msg_ids.clear()
         mq._status_msg_info.clear()
@@ -578,7 +587,9 @@ class TestMessageQueueCompletionOrdering:
         await mq.shutdown_workers()
 
     @pytest.mark.asyncio
-    async def test_queue_load_keeps_content_completion_order_and_dedupes_turns(self) -> None:
+    async def test_queue_load_keeps_content_completion_order_and_dedupes_turns(
+        self,
+    ) -> None:
         await mq.shutdown_workers()
         mq._tool_msg_ids.clear()
         mq._status_msg_info.clear()
@@ -655,7 +666,9 @@ class TestMessageQueueCompletionOrdering:
             "completion",
         ]
         assert observed[0][2] == ["turn1 chunk1", "turn1 chunk2"]
-        assert [turn_id for task_type, turn_id, _ in observed if task_type == "completion"] == [
+        assert [
+            turn_id for task_type, turn_id, _ in observed if task_type == "completion"
+        ] == [
             1,
             2,
         ]

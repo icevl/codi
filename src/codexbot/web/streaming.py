@@ -81,7 +81,9 @@ def _extract_stream_body(pane_text: str) -> str:
     return "\n".join(lines).rstrip()
 
 
-async def stream_pane_loop(bus: EventBus, *, poll_interval: float | None = None) -> None:
+async def stream_pane_loop(
+    bus: EventBus, *, poll_interval: float | None = None
+) -> None:
     """Poll tmux panes during active turns and publish stream events.
 
     Emits:
@@ -148,9 +150,7 @@ async def stream_pane_loop(bus: EventBus, *, poll_interval: float | None = None)
                         }
                     )
                 except Exception as e:
-                    logger.debug(
-                        "pane stream loop error window=%s: %s", window_id, e
-                    )
+                    logger.debug("pane stream loop error window=%s: %s", window_id, e)
         except asyncio.CancelledError:
             logger.info("Pane streaming cancelled")
             raise

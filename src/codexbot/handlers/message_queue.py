@@ -91,7 +91,9 @@ class MessageTask:
 # Per-(user, thread) message queues and worker tasks
 _message_queues: dict[tuple[int, int], asyncio.Queue[MessageTask]] = {}
 _queue_workers: dict[tuple[int, int], asyncio.Task[None]] = {}
-_queue_locks: dict[tuple[int, int], asyncio.Lock] = {}  # Protect drain/refill operations
+_queue_locks: dict[
+    tuple[int, int], asyncio.Lock
+] = {}  # Protect drain/refill operations
 
 # Map (tool_use_id, user_id, thread_id_or_0) -> telegram message_id
 # for editing tool_use messages with results
@@ -488,9 +490,7 @@ async def _merge_content_tasks(
     )
 
 
-async def _message_queue_worker(
-    bot: Bot, user_id: int, thread_id_or_0: int
-) -> None:
+async def _message_queue_worker(bot: Bot, user_id: int, thread_id_or_0: int) -> None:
     """Process message tasks for a user/thread lane sequentially."""
     queue = _message_queues[(user_id, thread_id_or_0)]
     lock = _queue_locks[(user_id, thread_id_or_0)]
@@ -711,7 +711,11 @@ async def _message_queue_worker(
                         await asyncio.sleep(delay)
                         continue
 
-                if completion_processed and task.session_id is not None and task.turn_id is not None:
+                if (
+                    completion_processed
+                    and task.session_id is not None
+                    and task.turn_id is not None
+                ):
                     await _complete_completion_turn(
                         user_id,
                         thread_id_or_0,
@@ -1144,7 +1148,6 @@ async def _check_and_send_status(
     if not pane_text:
         return
 
-    tid = thread_id or 0
     status_line = parse_status_line(pane_text)
     if status_line:
         await _process_status_update_task(

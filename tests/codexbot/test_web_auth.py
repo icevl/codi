@@ -128,9 +128,7 @@ def test_origin_same_origin_match() -> None:
     # Tailscale IP, LAN IP, hostname — all accepted as long as Origin and
     # Host match.
     assert (
-        auth.origin_allowed(
-            "http://100.64.1.13:8787", request_host="100.64.1.13:8787"
-        )
+        auth.origin_allowed("http://100.64.1.13:8787", request_host="100.64.1.13:8787")
         is True
     )
     assert (
@@ -141,9 +139,7 @@ def test_origin_same_origin_match() -> None:
     )
     # Mismatched host -> rejected.
     assert (
-        auth.origin_allowed(
-            "https://evil.com", request_host="my-laptop.local:8787"
-        )
+        auth.origin_allowed("https://evil.com", request_host="my-laptop.local:8787")
         is False
     )
 

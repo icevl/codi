@@ -95,13 +95,13 @@ async def test_screenshot_command_replies_with_named_media() -> None:
         patch("codexbot.bot.is_user_allowed", return_value=True),
         patch("codexbot.bot.session_manager") as mock_sm,
         patch("codexbot.bot.tmux_manager") as mock_tmux,
-        patch("codexbot.bot._capture_screenshot_text", new_callable=AsyncMock) as mock_capture,
+        patch(
+            "codexbot.bot._capture_screenshot_text", new_callable=AsyncMock
+        ) as mock_capture,
         patch("codexbot.bot.text_to_image", new_callable=AsyncMock) as mock_img,
     ):
         mock_sm.resolve_window_for_thread.return_value = "@5"
-        mock_tmux.find_window_by_id = AsyncMock(
-            return_value=MagicMock(window_id="@5")
-        )
+        mock_tmux.find_window_by_id = AsyncMock(return_value=MagicMock(window_id="@5"))
         mock_capture.return_value = "output line"
         mock_img.return_value = _make_png_bytes()
 
@@ -127,13 +127,13 @@ async def test_send_photo_skips_fallback_on_timeout() -> None:
         patch("codexbot.bot.is_user_allowed", return_value=True),
         patch("codexbot.bot.session_manager") as mock_sm,
         patch("codexbot.bot.tmux_manager") as mock_tmux,
-        patch("codexbot.bot._capture_screenshot_text", new_callable=AsyncMock) as mock_capture,
+        patch(
+            "codexbot.bot._capture_screenshot_text", new_callable=AsyncMock
+        ) as mock_capture,
         patch("codexbot.bot.text_to_image", new_callable=AsyncMock) as mock_img,
     ):
         mock_sm.resolve_window_for_thread.return_value = "@5"
-        mock_tmux.find_window_by_id = AsyncMock(
-            return_value=MagicMock(window_id="@5")
-        )
+        mock_tmux.find_window_by_id = AsyncMock(return_value=MagicMock(window_id="@5"))
         mock_capture.return_value = "output line"
         mock_img.return_value = _make_png_bytes()
 
@@ -163,13 +163,13 @@ async def test_send_photo_document_fallback_swallows_timeout() -> None:
         patch("codexbot.bot.is_user_allowed", return_value=True),
         patch("codexbot.bot.session_manager") as mock_sm,
         patch("codexbot.bot.tmux_manager") as mock_tmux,
-        patch("codexbot.bot._capture_screenshot_text", new_callable=AsyncMock) as mock_capture,
+        patch(
+            "codexbot.bot._capture_screenshot_text", new_callable=AsyncMock
+        ) as mock_capture,
         patch("codexbot.bot.text_to_image", new_callable=AsyncMock) as mock_img,
     ):
         mock_sm.resolve_window_for_thread.return_value = "@5"
-        mock_tmux.find_window_by_id = AsyncMock(
-            return_value=MagicMock(window_id="@5")
-        )
+        mock_tmux.find_window_by_id = AsyncMock(return_value=MagicMock(window_id="@5"))
         mock_capture.return_value = "output line"
         mock_img.return_value = _make_png_bytes()
 
@@ -191,13 +191,13 @@ async def test_send_photo_fallback_to_document() -> None:
         patch("codexbot.bot.is_user_allowed", return_value=True),
         patch("codexbot.bot.session_manager") as mock_sm,
         patch("codexbot.bot.tmux_manager") as mock_tmux,
-        patch("codexbot.bot._capture_screenshot_text", new_callable=AsyncMock) as mock_capture,
+        patch(
+            "codexbot.bot._capture_screenshot_text", new_callable=AsyncMock
+        ) as mock_capture,
         patch("codexbot.bot.text_to_image", new_callable=AsyncMock) as mock_img,
     ):
         mock_sm.resolve_window_for_thread.return_value = "@5"
-        mock_tmux.find_window_by_id = AsyncMock(
-            return_value=MagicMock(window_id="@5")
-        )
+        mock_tmux.find_window_by_id = AsyncMock(return_value=MagicMock(window_id="@5"))
         mock_capture.return_value = "output line"
         mock_img.return_value = _make_png_bytes()
 
@@ -224,13 +224,13 @@ async def test_send_photo_fallback_to_document_on_dimension_error() -> None:
         patch("codexbot.bot.is_user_allowed", return_value=True),
         patch("codexbot.bot.session_manager") as mock_sm,
         patch("codexbot.bot.tmux_manager") as mock_tmux,
-        patch("codexbot.bot._capture_screenshot_text", new_callable=AsyncMock) as mock_capture,
+        patch(
+            "codexbot.bot._capture_screenshot_text", new_callable=AsyncMock
+        ) as mock_capture,
         patch("codexbot.bot.text_to_image", new_callable=AsyncMock) as mock_img,
     ):
         mock_sm.resolve_window_for_thread.return_value = "@5"
-        mock_tmux.find_window_by_id = AsyncMock(
-            return_value=MagicMock(window_id="@5")
-        )
+        mock_tmux.find_window_by_id = AsyncMock(return_value=MagicMock(window_id="@5"))
         mock_capture.return_value = "output line"
         mock_img.return_value = _make_png_bytes()
 
@@ -256,13 +256,13 @@ async def test_send_photo_fallback_classifies_dimension_error_reason_in_logs(
         patch("codexbot.bot.is_user_allowed", return_value=True),
         patch("codexbot.bot.session_manager") as mock_sm,
         patch("codexbot.bot.tmux_manager") as mock_tmux,
-        patch("codexbot.bot._capture_screenshot_text", new_callable=AsyncMock) as mock_capture,
+        patch(
+            "codexbot.bot._capture_screenshot_text", new_callable=AsyncMock
+        ) as mock_capture,
         patch("codexbot.bot.text_to_image", new_callable=AsyncMock) as mock_img,
     ):
         mock_sm.resolve_window_for_thread.return_value = "@5"
-        mock_tmux.find_window_by_id = AsyncMock(
-            return_value=MagicMock(window_id="@5")
-        )
+        mock_tmux.find_window_by_id = AsyncMock(return_value=MagicMock(window_id="@5"))
         mock_capture.return_value = "output line"
         mock_img.return_value = _make_png_bytes()
 
@@ -294,13 +294,13 @@ async def test_screenshot_refresh_uses_named_media() -> None:
         patch("codexbot.bot.is_user_allowed", return_value=True),
         patch("codexbot.bot.session_manager") as mock_sm,
         patch("codexbot.bot.tmux_manager") as mock_tmux,
-        patch("codexbot.bot._capture_screenshot_text", new_callable=AsyncMock) as mock_capture,
+        patch(
+            "codexbot.bot._capture_screenshot_text", new_callable=AsyncMock
+        ) as mock_capture,
         patch("codexbot.bot.text_to_image", new_callable=AsyncMock) as mock_img,
     ):
         mock_sm.is_window_bound_to_thread.return_value = True
-        mock_tmux.find_window_by_id = AsyncMock(
-            return_value=MagicMock(window_id="@5")
-        )
+        mock_tmux.find_window_by_id = AsyncMock(return_value=MagicMock(window_id="@5"))
         mock_capture.return_value = "pane output"
         mock_img.return_value = _make_png_bytes()
 
@@ -313,7 +313,9 @@ async def test_screenshot_refresh_uses_named_media() -> None:
 
 
 @pytest.mark.asyncio
-async def test_screenshot_refresh_checks_topic_window_match_and_clears_stale_state() -> None:
+async def test_screenshot_refresh_checks_topic_window_match_and_clears_stale_state() -> (
+    None
+):
     update = _make_callback_update(f"{CB_SCREENSHOT_REFRESH}@5", thread_id=42)
     context = MagicMock()
     context.user_data = {
@@ -366,15 +368,23 @@ async def test_screenshot_refresh_waits_for_thread_queue_before_edit() -> None:
         patch("codexbot.bot.session_manager") as mock_sm,
         patch("codexbot.bot.tmux_manager") as mock_tmux,
         patch("codexbot.bot.get_message_queue", return_value=queue),
-        patch("codexbot.bot._capture_screenshot_text", new_callable=AsyncMock, side_effect=_capture),
-        patch("codexbot.bot.text_to_image", new_callable=AsyncMock, side_effect=_render),
-        patch("codexbot.bot._edit_screenshot_with_fallback", new_callable=AsyncMock, side_effect=_edit),
+        patch(
+            "codexbot.bot._capture_screenshot_text",
+            new_callable=AsyncMock,
+            side_effect=_capture,
+        ),
+        patch(
+            "codexbot.bot.text_to_image", new_callable=AsyncMock, side_effect=_render
+        ),
+        patch(
+            "codexbot.bot._edit_screenshot_with_fallback",
+            new_callable=AsyncMock,
+            side_effect=_edit,
+        ),
         patch("codexbot.bot._build_screenshot_keyboard", return_value=MagicMock()),
     ):
         mock_sm.is_window_bound_to_thread.return_value = True
-        mock_tmux.find_window_by_id = AsyncMock(
-            return_value=MagicMock(window_id="@5")
-        )
+        mock_tmux.find_window_by_id = AsyncMock(return_value=MagicMock(window_id="@5"))
 
         await callback_handler(update, context)
 
@@ -414,16 +424,24 @@ async def test_screenshot_keypress_waits_for_thread_queue_before_refresh() -> No
         patch("codexbot.bot.session_manager") as mock_sm,
         patch("codexbot.bot.tmux_manager") as mock_tmux,
         patch("codexbot.bot.get_message_queue", return_value=queue),
-        patch("codexbot.bot._capture_screenshot_text", new_callable=AsyncMock, side_effect=_capture),
-        patch("codexbot.bot.text_to_image", new_callable=AsyncMock, side_effect=_render),
-        patch("codexbot.bot._edit_screenshot_with_fallback", new_callable=AsyncMock, side_effect=_edit),
+        patch(
+            "codexbot.bot._capture_screenshot_text",
+            new_callable=AsyncMock,
+            side_effect=_capture,
+        ),
+        patch(
+            "codexbot.bot.text_to_image", new_callable=AsyncMock, side_effect=_render
+        ),
+        patch(
+            "codexbot.bot._edit_screenshot_with_fallback",
+            new_callable=AsyncMock,
+            side_effect=_edit,
+        ),
         patch("codexbot.bot._build_screenshot_keyboard", return_value=MagicMock()),
         patch("codexbot.bot.asyncio.sleep", new=AsyncMock()),
     ):
         mock_sm.is_window_bound_to_thread.return_value = True
-        mock_tmux.find_window_by_id = AsyncMock(
-            return_value=MagicMock(window_id="@5")
-        )
+        mock_tmux.find_window_by_id = AsyncMock(return_value=MagicMock(window_id="@5"))
         mock_tmux.send_keys = AsyncMock(side_effect=_send_keys)
 
         await callback_handler(update, context)
@@ -439,19 +457,22 @@ async def test_screenshot_refresh_switches_mode_on_photo_edit_failure() -> None:
     context = MagicMock()
     context.user_data = {}
     _set_screenshot_mode(context.user_data, 42, "@5", SHOT_MEDIA_PHOTO)
-    update.callback_query.edit_message_media.side_effect = [RuntimeError("photo fail"), None]
+    update.callback_query.edit_message_media.side_effect = [
+        RuntimeError("photo fail"),
+        None,
+    ]
 
     with (
         patch("codexbot.bot.is_user_allowed", return_value=True),
         patch("codexbot.bot.session_manager") as mock_sm,
         patch("codexbot.bot.tmux_manager") as mock_tmux,
-        patch("codexbot.bot._capture_screenshot_text", new_callable=AsyncMock) as mock_capture,
+        patch(
+            "codexbot.bot._capture_screenshot_text", new_callable=AsyncMock
+        ) as mock_capture,
         patch("codexbot.bot.text_to_image", new_callable=AsyncMock) as mock_img,
     ):
         mock_sm.is_window_bound_to_thread.return_value = True
-        mock_tmux.find_window_by_id = AsyncMock(
-            return_value=MagicMock(window_id="@5")
-        )
+        mock_tmux.find_window_by_id = AsyncMock(return_value=MagicMock(window_id="@5"))
         mock_capture.return_value = "pane output"
         mock_img.return_value = _make_png_bytes()
 
@@ -484,13 +505,13 @@ async def test_screenshot_refresh_falls_back_to_document_on_dimension_error() ->
         patch("codexbot.bot.is_user_allowed", return_value=True),
         patch("codexbot.bot.session_manager") as mock_sm,
         patch("codexbot.bot.tmux_manager") as mock_tmux,
-        patch("codexbot.bot._capture_screenshot_text", new_callable=AsyncMock) as mock_capture,
+        patch(
+            "codexbot.bot._capture_screenshot_text", new_callable=AsyncMock
+        ) as mock_capture,
         patch("codexbot.bot.text_to_image", new_callable=AsyncMock) as mock_img,
     ):
         mock_sm.is_window_bound_to_thread.return_value = True
-        mock_tmux.find_window_by_id = AsyncMock(
-            return_value=MagicMock(window_id="@5")
-        )
+        mock_tmux.find_window_by_id = AsyncMock(return_value=MagicMock(window_id="@5"))
         mock_capture.return_value = "pane output"
         mock_img.return_value = _make_png_bytes()
 
@@ -523,13 +544,13 @@ async def test_screenshot_refresh_skips_mode_fallback_on_timeout() -> None:
         patch("codexbot.bot.is_user_allowed", return_value=True),
         patch("codexbot.bot.session_manager") as mock_sm,
         patch("codexbot.bot.tmux_manager") as mock_tmux,
-        patch("codexbot.bot._capture_screenshot_text", new_callable=AsyncMock) as mock_capture,
+        patch(
+            "codexbot.bot._capture_screenshot_text", new_callable=AsyncMock
+        ) as mock_capture,
         patch("codexbot.bot.text_to_image", new_callable=AsyncMock) as mock_img,
     ):
         mock_sm.is_window_bound_to_thread.return_value = True
-        mock_tmux.find_window_by_id = AsyncMock(
-            return_value=MagicMock(window_id="@5")
-        )
+        mock_tmux.find_window_by_id = AsyncMock(return_value=MagicMock(window_id="@5"))
         mock_capture.return_value = "pane output"
         mock_img.return_value = _make_png_bytes()
 
@@ -550,13 +571,13 @@ async def test_screenshot_refresh_continues_in_document_mode() -> None:
         patch("codexbot.bot.is_user_allowed", return_value=True),
         patch("codexbot.bot.session_manager") as mock_sm,
         patch("codexbot.bot.tmux_manager") as mock_tmux,
-        patch("codexbot.bot._capture_screenshot_text", new_callable=AsyncMock) as mock_capture,
+        patch(
+            "codexbot.bot._capture_screenshot_text", new_callable=AsyncMock
+        ) as mock_capture,
         patch("codexbot.bot.text_to_image", new_callable=AsyncMock) as mock_img,
     ):
         mock_sm.is_window_bound_to_thread.return_value = True
-        mock_tmux.find_window_by_id = AsyncMock(
-            return_value=MagicMock(window_id="@5")
-        )
+        mock_tmux.find_window_by_id = AsyncMock(return_value=MagicMock(window_id="@5"))
         mock_capture.return_value = "pane output"
         mock_img.return_value = _make_png_bytes()
 
@@ -608,13 +629,13 @@ async def test_screenshot_command_resizes_oversized_preview_to_photo() -> None:
         patch("codexbot.bot.is_user_allowed", return_value=True),
         patch("codexbot.bot.session_manager") as mock_sm,
         patch("codexbot.bot.tmux_manager") as mock_tmux,
-        patch("codexbot.bot._capture_screenshot_text", new_callable=AsyncMock) as mock_capture,
+        patch(
+            "codexbot.bot._capture_screenshot_text", new_callable=AsyncMock
+        ) as mock_capture,
         patch("codexbot.bot.text_to_image", new_callable=AsyncMock) as mock_img,
     ):
         mock_sm.resolve_window_for_thread.return_value = "@5"
-        mock_tmux.find_window_by_id = AsyncMock(
-            return_value=MagicMock(window_id="@5")
-        )
+        mock_tmux.find_window_by_id = AsyncMock(return_value=MagicMock(window_id="@5"))
         mock_capture.return_value = "output line"
         mock_img.return_value = _make_png_bytes(4000, 3000)
 

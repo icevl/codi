@@ -1527,9 +1527,7 @@ async def skillhelp_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         return
 
     wid = session_manager.get_window_for_thread(user.id, thread_id)
-    bound_runtime = (
-        session_manager.get_window_state(wid).runtime if wid else None
-    )
+    bound_runtime = session_manager.get_window_state(wid).runtime if wid else None
     skills = discover_skills(runtime=bound_runtime)
     if not skills:
         skills_root = (
@@ -2470,7 +2468,10 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         context.user_data.pop("_pending_thread_text", None)
 
     # Ignore text while the runtime picker is open (only for the same thread)
-    if context.user_data and context.user_data.get(STATE_KEY) == STATE_SELECTING_RUNTIME:
+    if (
+        context.user_data
+        and context.user_data.get(STATE_KEY) == STATE_SELECTING_RUNTIME
+    ):
         pending_tid = context.user_data.get("_pending_thread_id")
         if pending_tid == thread_id:
             await safe_reply(
@@ -3028,10 +3029,14 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             context.user_data.get(SKILL_THREAD_KEY) if context.user_data else None
         )
         if skill_tid is not None and current_tid != skill_tid:
-            await _safe_answer_callback_query(query, "Stale skills board (topic mismatch)", show_alert=True)
+            await _safe_answer_callback_query(
+                query, "Stale skills board (topic mismatch)", show_alert=True
+            )
             return
         if current_tid is None:
-            await _safe_answer_callback_query(query, "Use this in a named topic", show_alert=True)
+            await _safe_answer_callback_query(
+                query, "Use this in a named topic", show_alert=True
+            )
             return
         try:
             idx = int(data[len(CB_SKILL_SELECT) :])
@@ -3041,7 +3046,8 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
         skills = context.user_data.get(SKILL_LIST_KEY, []) if context.user_data else []
         if idx < 0 or idx >= len(skills):
-            await _safe_answer_callback_query(query, 
+            await _safe_answer_callback_query(
+                query,
                 "Skill list changed, run /skillhelp again",
                 show_alert=True,
             )
@@ -3070,12 +3076,15 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             context.user_data.get(SKILL_THREAD_KEY) if context.user_data else None
         )
         if skill_tid is not None and current_tid != skill_tid:
-            await _safe_answer_callback_query(query, "Stale skills board (topic mismatch)", show_alert=True)
+            await _safe_answer_callback_query(
+                query, "Stale skills board (topic mismatch)", show_alert=True
+            )
             return
 
         skills = context.user_data.get(SKILL_LIST_KEY, []) if context.user_data else []
         if not skills:
-            await _safe_answer_callback_query(query, 
+            await _safe_answer_callback_query(
+                query,
                 "Skill list changed, run /skillhelp again",
                 show_alert=True,
             )
@@ -3096,7 +3105,9 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         if context.user_data is not None:
             context.user_data[SKILL_PAGE_KEY] = page
         await safe_edit(query, text, reply_markup=keyboard)
-        await _safe_answer_callback_query(query, )
+        await _safe_answer_callback_query(
+            query,
+        )
 
     elif data == CB_SKILL_CANCEL:
         current_tid = _get_thread_id(update)
@@ -3104,7 +3115,9 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             context.user_data.get(SKILL_THREAD_KEY) if context.user_data else None
         )
         if skill_tid is not None and current_tid != skill_tid:
-            await _safe_answer_callback_query(query, "Stale skills board (topic mismatch)", show_alert=True)
+            await _safe_answer_callback_query(
+                query, "Stale skills board (topic mismatch)", show_alert=True
+            )
             return
 
         _clear_armed_skill(context.user_data, current_tid)
@@ -3128,7 +3141,9 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             context.user_data.get("_pending_thread_id") if context.user_data else None
         )
         if pending_tid is not None and _get_thread_id(update) != pending_tid:
-            await _safe_answer_callback_query(query, "Stale browser (topic mismatch)", show_alert=True)
+            await _safe_answer_callback_query(
+                query, "Stale browser (topic mismatch)", show_alert=True
+            )
             return
         # callback_data contains index, not dir name (to avoid 64-byte limit)
         try:
@@ -3142,8 +3157,8 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             context.user_data.get(BROWSE_DIRS_KEY, []) if context.user_data else []
         )
         if idx < 0 or idx >= len(cached_dirs):
-            await _safe_answer_callback_query(query, 
-                "Directory list changed, please refresh", show_alert=True
+            await _safe_answer_callback_query(
+                query, "Directory list changed, please refresh", show_alert=True
             )
             return
         subdir_name = cached_dirs[idx]
@@ -3157,7 +3172,9 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         new_path = (Path(current_path) / subdir_name).resolve()
 
         if not new_path.exists() or not new_path.is_dir():
-            await _safe_answer_callback_query(query, "Directory not found", show_alert=True)
+            await _safe_answer_callback_query(
+                query, "Directory not found", show_alert=True
+            )
             return
 
         new_path_str = str(new_path)
@@ -3169,14 +3186,18 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         if context.user_data is not None:
             context.user_data[BROWSE_DIRS_KEY] = subdirs
         await safe_edit(query, msg_text, reply_markup=keyboard)
-        await _safe_answer_callback_query(query, )
+        await _safe_answer_callback_query(
+            query,
+        )
 
     elif data == CB_DIR_UP:
         pending_tid = (
             context.user_data.get("_pending_thread_id") if context.user_data else None
         )
         if pending_tid is not None and _get_thread_id(update) != pending_tid:
-            await _safe_answer_callback_query(query, "Stale browser (topic mismatch)", show_alert=True)
+            await _safe_answer_callback_query(
+                query, "Stale browser (topic mismatch)", show_alert=True
+            )
             return
         default_path = str(Path.cwd())
         current_path = (
@@ -3197,14 +3218,18 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         if context.user_data is not None:
             context.user_data[BROWSE_DIRS_KEY] = subdirs
         await safe_edit(query, msg_text, reply_markup=keyboard)
-        await _safe_answer_callback_query(query, )
+        await _safe_answer_callback_query(
+            query,
+        )
 
     elif data.startswith(CB_DIR_PAGE):
         pending_tid = (
             context.user_data.get("_pending_thread_id") if context.user_data else None
         )
         if pending_tid is not None and _get_thread_id(update) != pending_tid:
-            await _safe_answer_callback_query(query, "Stale browser (topic mismatch)", show_alert=True)
+            await _safe_answer_callback_query(
+                query, "Stale browser (topic mismatch)", show_alert=True
+            )
             return
         try:
             pg = int(data[len(CB_DIR_PAGE) :])
@@ -3224,7 +3249,9 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         if context.user_data is not None:
             context.user_data[BROWSE_DIRS_KEY] = subdirs
         await safe_edit(query, msg_text, reply_markup=keyboard)
-        await _safe_answer_callback_query(query, )
+        await _safe_answer_callback_query(
+            query,
+        )
 
     elif data == CB_DIR_CONFIRM:
         default_path = str(Path.cwd())
@@ -3245,7 +3272,9 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             if context.user_data is not None:
                 context.user_data.pop("_pending_thread_id", None)
                 context.user_data.pop("_pending_thread_text", None)
-            await _safe_answer_callback_query(query, "Stale browser (topic mismatch)", show_alert=True)
+            await _safe_answer_callback_query(
+                query, "Stale browser (topic mismatch)", show_alert=True
+            )
             return
 
         clear_browse_state(context.user_data)
@@ -3268,7 +3297,9 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                     context.user_data["_selected_path"] = selected_path
                 text, keyboard = build_session_picker(sessions)
                 await safe_edit(query, text, reply_markup=keyboard)
-                await _safe_answer_callback_query(query, )
+                await _safe_answer_callback_query(
+                    query,
+                )
                 return
 
         # No existing sessions (or Claude runtime) — create new window directly
@@ -3286,7 +3317,9 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             context.user_data.get("_pending_thread_id") if context.user_data else None
         )
         if pending_tid is not None and _get_thread_id(update) != pending_tid:
-            await _safe_answer_callback_query(query, "Stale browser (topic mismatch)", show_alert=True)
+            await _safe_answer_callback_query(
+                query, "Stale browser (topic mismatch)", show_alert=True
+            )
             return
         clear_browse_state(context.user_data)
         if context.user_data is not None:
@@ -3306,7 +3339,9 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         if pending_tid is None:
             pending_tid = _get_thread_id(update)
         if pending_tid is not None and _get_thread_id(update) != pending_tid:
-            await _safe_answer_callback_query(query, "Stale picker (topic mismatch)", show_alert=True)
+            await _safe_answer_callback_query(
+                query, "Stale picker (topic mismatch)", show_alert=True
+            )
             return
         try:
             idx = int(data[len(CB_SESSION_SELECT) :])
@@ -3353,7 +3388,9 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         if pending_tid is None:
             pending_tid = _get_thread_id(update)
         if pending_tid is not None and _get_thread_id(update) != pending_tid:
-            await _safe_answer_callback_query(query, "Stale picker (topic mismatch)", show_alert=True)
+            await _safe_answer_callback_query(
+                query, "Stale picker (topic mismatch)", show_alert=True
+            )
             return
         selected_path = (
             context.user_data.get("_selected_path", str(Path.cwd()))
@@ -3383,7 +3420,9 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             context.user_data.get("_pending_thread_id") if context.user_data else None
         )
         if pending_tid is not None and _get_thread_id(update) != pending_tid:
-            await _safe_answer_callback_query(query, "Stale picker (topic mismatch)", show_alert=True)
+            await _safe_answer_callback_query(
+                query, "Stale picker (topic mismatch)", show_alert=True
+            )
             return
         clear_session_picker_state(context.user_data)
         if context.user_data is not None:
@@ -3400,7 +3439,9 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             context.user_data.get("_pending_thread_id") if context.user_data else None
         )
         if pending_tid is not None and _get_thread_id(update) != pending_tid:
-            await _safe_answer_callback_query(query, "Stale picker (topic mismatch)", show_alert=True)
+            await _safe_answer_callback_query(
+                query, "Stale picker (topic mismatch)", show_alert=True
+            )
             return
         try:
             idx = int(data[len(CB_WIN_BIND) :])
@@ -3412,7 +3453,9 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             context.user_data.get(UNBOUND_WINDOWS_KEY, []) if context.user_data else []
         )
         if idx < 0 or idx >= len(cached_windows):
-            await _safe_answer_callback_query(query, "Window list changed, please retry", show_alert=True)
+            await _safe_answer_callback_query(
+                query, "Window list changed, please retry", show_alert=True
+            )
             return
         selected_wid = cached_windows[idx]
 
@@ -3420,7 +3463,9 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         w = await tmux_manager.find_window_by_id(selected_wid)
         if not w:
             display = session_manager.get_display_name(selected_wid)
-            await _safe_answer_callback_query(query, f"Window '{display}' no longer exists", show_alert=True)
+            await _safe_answer_callback_query(
+                query, f"Window '{display}' no longer exists", show_alert=True
+            )
             return
 
         thread_id = _get_thread_id(update)
@@ -3539,7 +3584,9 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             context.user_data.get("_pending_thread_id") if context.user_data else None
         )
         if pending_tid is not None and _get_thread_id(update) != pending_tid:
-            await _safe_answer_callback_query(query, "Stale picker (topic mismatch)", show_alert=True)
+            await _safe_answer_callback_query(
+                query, "Stale picker (topic mismatch)", show_alert=True
+            )
             return
         # Preserve pending thread info, clear only picker state
         clear_window_picker_state(context.user_data)
@@ -3547,7 +3594,9 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         if context.user_data is not None:
             context.user_data[STATE_KEY] = STATE_SELECTING_RUNTIME
         await safe_edit(query, msg_text, reply_markup=keyboard)
-        await _safe_answer_callback_query(query, )
+        await _safe_answer_callback_query(
+            query,
+        )
 
     # Runtime picker: chose Codex or Claude → transition to directory browser
     elif data in (CB_RUNTIME_CODEX, CB_RUNTIME_CLAUDE):
@@ -3555,7 +3604,9 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             context.user_data.get("_pending_thread_id") if context.user_data else None
         )
         if pending_tid is not None and _get_thread_id(update) != pending_tid:
-            await _safe_answer_callback_query(query, "Stale picker (topic mismatch)", show_alert=True)
+            await _safe_answer_callback_query(
+                query, "Stale picker (topic mismatch)", show_alert=True
+            )
             return
         runtime_name = "codex" if data == CB_RUNTIME_CODEX else "claude"
         clear_runtime_picker_state(context.user_data)
@@ -3568,7 +3619,9 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             context.user_data[BROWSE_DIRS_KEY] = subdirs
             context.user_data[PENDING_RUNTIME_KEY] = runtime_name
         await safe_edit(query, msg_text, reply_markup=keyboard)
-        await _safe_answer_callback_query(query, )
+        await _safe_answer_callback_query(
+            query,
+        )
 
     # Runtime picker: cancel
     elif data == CB_RUNTIME_CANCEL:
@@ -3576,7 +3629,9 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             context.user_data.get("_pending_thread_id") if context.user_data else None
         )
         if pending_tid is not None and _get_thread_id(update) != pending_tid:
-            await _safe_answer_callback_query(query, "Stale picker (topic mismatch)", show_alert=True)
+            await _safe_answer_callback_query(
+                query, "Stale picker (topic mismatch)", show_alert=True
+            )
             return
         clear_runtime_picker_state(context.user_data)
         if context.user_data is not None:
@@ -3592,7 +3647,9 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             context.user_data.get("_pending_thread_id") if context.user_data else None
         )
         if pending_tid is not None and _get_thread_id(update) != pending_tid:
-            await _safe_answer_callback_query(query, "Stale picker (topic mismatch)", show_alert=True)
+            await _safe_answer_callback_query(
+                query, "Stale picker (topic mismatch)", show_alert=True
+            )
             return
         clear_window_picker_state(context.user_data)
         if context.user_data is not None:
@@ -3617,12 +3674,16 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await _drain_thread_queue(user.id, thread_id)
         w = await tmux_manager.find_window_by_id(window_id)
         if not w:
-            await _safe_answer_callback_query(query, "Window no longer exists", show_alert=True)
+            await _safe_answer_callback_query(
+                query, "Window no longer exists", show_alert=True
+            )
             return
 
         text = await _capture_screenshot_text(w.window_id)
         if not text:
-            await _safe_answer_callback_query(query, "Failed to capture pane", show_alert=True)
+            await _safe_answer_callback_query(
+                query, "Failed to capture pane", show_alert=True
+            )
             return
 
         png_bytes = await text_to_image(
@@ -3643,24 +3704,32 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         if mode is not None:
             await _safe_answer_callback_query(query, "Refreshed")
         else:
-            await _safe_answer_callback_query(query, "Failed to refresh", show_alert=True)
+            await _safe_answer_callback_query(
+                query, "Failed to refresh", show_alert=True
+            )
 
     # Structured interactive prompt: option selection
     elif data.startswith(CB_PROMPT_SELECT):
         thread_id = _get_thread_id(update)
         prompt_state = _get_structured_prompt_state(user.id, thread_id)
         if not prompt_state:
-            await _safe_answer_callback_query(query, "Prompt is no longer active", show_alert=True)
+            await _safe_answer_callback_query(
+                query, "Prompt is no longer active", show_alert=True
+            )
             return
         if not _is_supported_structured_prompt_state(prompt_state):
             await _clear_structured_prompt_state(user.id, thread_id, bot=context.bot)
-            await _safe_answer_callback_query(query, "Prompt is no longer active", show_alert=True)
+            await _safe_answer_callback_query(
+                query, "Prompt is no longer active", show_alert=True
+            )
             return
 
         window_id = str(prompt_state.get("window_id", ""))
         if not window_id:
             await _clear_structured_prompt_state(user.id, thread_id, bot=context.bot)
-            await _safe_answer_callback_query(query, "Prompt state is invalid", show_alert=True)
+            await _safe_answer_callback_query(
+                query, "Prompt state is invalid", show_alert=True
+            )
             return
 
         if not await _guard_callback_window_match(
@@ -3681,13 +3750,17 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             and isinstance(query_message_id, int)
             and state_message_id != query_message_id
         ):
-            await _safe_answer_callback_query(query, "Stale prompt message", show_alert=True)
+            await _safe_answer_callback_query(
+                query, "Stale prompt message", show_alert=True
+            )
             return
 
         try:
             option_index = int(data[len(CB_PROMPT_SELECT) :])
         except ValueError:
-            await _safe_answer_callback_query(query, "Invalid selection", show_alert=True)
+            await _safe_answer_callback_query(
+                query, "Invalid selection", show_alert=True
+            )
             return
 
         options = prompt_state.get("options")
@@ -3696,7 +3769,9 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             or option_index < 0
             or option_index >= len(options)
         ):
-            await _safe_answer_callback_query(query, "Selection is out of range", show_alert=True)
+            await _safe_answer_callback_query(
+                query, "Selection is out of range", show_alert=True
+            )
             return
 
         selection_number = str(option_index + 1)
@@ -3707,8 +3782,8 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             selection_number,
         )
         if not send_ok:
-            await _safe_answer_callback_query(query, 
-                f"Failed to send selection: {send_message}", show_alert=True
+            await _safe_answer_callback_query(
+                query, f"Failed to send selection: {send_message}", show_alert=True
             )
             return
 
@@ -3728,11 +3803,15 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         thread_id = _get_thread_id(update)
         prompt_state = _get_structured_prompt_state(user.id, thread_id)
         if not prompt_state:
-            await _safe_answer_callback_query(query, "Prompt is no longer active", show_alert=True)
+            await _safe_answer_callback_query(
+                query, "Prompt is no longer active", show_alert=True
+            )
             return
         if not _is_supported_structured_prompt_state(prompt_state):
             await _clear_structured_prompt_state(user.id, thread_id, bot=context.bot)
-            await _safe_answer_callback_query(query, "Prompt is no longer active", show_alert=True)
+            await _safe_answer_callback_query(
+                query, "Prompt is no longer active", show_alert=True
+            )
             return
 
         try:
@@ -3751,18 +3830,24 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         )
         prompt_state["page"] = bounded_page
         await safe_edit(query, text, reply_markup=keyboard)
-        await _safe_answer_callback_query(query, )
+        await _safe_answer_callback_query(
+            query,
+        )
 
     # Structured interactive prompt: cancel
     elif data == CB_PROMPT_CANCEL:
         thread_id = _get_thread_id(update)
         prompt_state = _get_structured_prompt_state(user.id, thread_id)
         if not prompt_state:
-            await _safe_answer_callback_query(query, "Prompt is no longer active", show_alert=True)
+            await _safe_answer_callback_query(
+                query, "Prompt is no longer active", show_alert=True
+            )
             return
         if not _is_supported_structured_prompt_state(prompt_state):
             await _clear_structured_prompt_state(user.id, thread_id, bot=context.bot)
-            await _safe_answer_callback_query(query, "Prompt is no longer active", show_alert=True)
+            await _safe_answer_callback_query(
+                query, "Prompt is no longer active", show_alert=True
+            )
             return
 
         window_id = str(prompt_state.get("window_id", ""))
@@ -3785,7 +3870,9 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         )
 
     elif data == "noop":
-        await _safe_answer_callback_query(query, )
+        await _safe_answer_callback_query(
+            query,
+        )
 
     # Interactive UI: Up arrow
     elif data.startswith(CB_ASK_UP):
@@ -3805,7 +3892,9 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             await tmux_manager.send_keys(w.window_id, "Up", enter=False, literal=False)
             await asyncio.sleep(0.5)
             await handle_interactive_ui(context.bot, user.id, window_id, thread_id)
-        await _safe_answer_callback_query(query, )
+        await _safe_answer_callback_query(
+            query,
+        )
 
     # Interactive UI: Down arrow
     elif data.startswith(CB_ASK_DOWN):
@@ -3827,7 +3916,9 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             )
             await asyncio.sleep(0.5)
             await handle_interactive_ui(context.bot, user.id, window_id, thread_id)
-        await _safe_answer_callback_query(query, )
+        await _safe_answer_callback_query(
+            query,
+        )
 
     # Interactive UI: Left arrow
     elif data.startswith(CB_ASK_LEFT):
@@ -3849,7 +3940,9 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             )
             await asyncio.sleep(0.5)
             await handle_interactive_ui(context.bot, user.id, window_id, thread_id)
-        await _safe_answer_callback_query(query, )
+        await _safe_answer_callback_query(
+            query,
+        )
 
     # Interactive UI: Right arrow
     elif data.startswith(CB_ASK_RIGHT):
@@ -3871,7 +3964,9 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             )
             await asyncio.sleep(0.5)
             await handle_interactive_ui(context.bot, user.id, window_id, thread_id)
-        await _safe_answer_callback_query(query, )
+        await _safe_answer_callback_query(
+            query,
+        )
 
     # Interactive UI: Previous question
     elif data.startswith(CB_ASK_PGUP):
@@ -4047,7 +4142,9 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         tmux_key, enter, literal = key_info
         w = await tmux_manager.find_window_by_id(window_id)
         if not w:
-            await _safe_answer_callback_query(query, "Window not found", show_alert=True)
+            await _safe_answer_callback_query(
+                query, "Window not found", show_alert=True
+            )
             return
 
         await _drain_thread_queue(user.id, thread_id)

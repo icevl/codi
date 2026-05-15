@@ -67,9 +67,7 @@ class ClaudeRuntime:
     ) -> str | None:
         sessions_dir = config.claude_sessions_path
         if not sessions_dir.exists():
-            logger.debug(
-                "claude sessions dir does not exist: %s", sessions_dir
-            )
+            logger.debug("claude sessions dir does not exist: %s", sessions_dir)
             return None
 
         deadline = (
@@ -175,15 +173,13 @@ async def _maybe_advance_startup_prompt(
 
 def _classify_startup_prompt(pane_text: str) -> str | None:
     """Return the known startup prompt action name for a pane snapshot."""
-    if (
-        _RE_BYPASS_PERMISSIONS_PROMPT.search(pane_text)
-        and _RE_BYPASS_ACCEPT_OPTION.search(pane_text)
-    ):
+    if _RE_BYPASS_PERMISSIONS_PROMPT.search(
+        pane_text
+    ) and _RE_BYPASS_ACCEPT_OPTION.search(pane_text):
         return "bypass_permissions"
-    if (
-        _RE_WORKSPACE_TRUST_PROMPT.search(pane_text)
-        and _RE_WORKSPACE_TRUST_ACCEPT_OPTION.search(pane_text)
-    ):
+    if _RE_WORKSPACE_TRUST_PROMPT.search(
+        pane_text
+    ) and _RE_WORKSPACE_TRUST_ACCEPT_OPTION.search(pane_text):
         return "workspace_trust"
     return None
 
@@ -244,9 +240,7 @@ def _read_claude_session_for_pane(
     return best_sid
 
 
-def _read_session_file_for_pid(
-    sessions_dir: Path, pid: int, cwd: str
-) -> str | None:
+def _read_session_file_for_pid(sessions_dir: Path, pid: int, cwd: str) -> str | None:
     path = sessions_dir / f"{pid}.json"
     try:
         data = json.loads(path.read_text(encoding="utf-8"))

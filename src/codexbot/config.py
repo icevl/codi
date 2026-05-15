@@ -118,7 +118,9 @@ class Config:
         # session operations through a browser UI.
         self.web_ui_password: str = os.getenv("WEB_UI_PASSWORD", "").strip()
         self.web_ui_enabled: bool = bool(self.web_ui_password)
-        self.web_ui_host: str = os.getenv("WEB_UI_HOST", "127.0.0.1").strip() or "127.0.0.1"
+        self.web_ui_host: str = (
+            os.getenv("WEB_UI_HOST", "127.0.0.1").strip() or "127.0.0.1"
+        )
         try:
             self.web_ui_port: int = int(os.getenv("WEB_UI_PORT", "8787"))
         except ValueError:

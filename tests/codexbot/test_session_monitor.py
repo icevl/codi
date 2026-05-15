@@ -135,8 +135,7 @@ class TestReadNewLinesOffsetRecovery:
             rec
             for rec in caplog.records
             if rec.levelno == logging.INFO
-            and "suppressing further warnings until transcript advances"
-            in rec.message
+            and "suppressing further warnings until transcript advances" in rec.message
         ]
 
         assert len(warning_records) == _PARTIAL_JSONL_WARN_RETRY_LIMIT
@@ -639,7 +638,9 @@ class TestSessionMonitorSessionRebinding:
             async def fake_refresh(wid: str) -> str | None:
                 return {"@1": "sid-1", "@2": "sid-2-web", "@3": None}[wid]
 
-            mock_sm.refresh_window_session_if_stale = AsyncMock(side_effect=fake_refresh)
+            mock_sm.refresh_window_session_if_stale = AsyncMock(
+                side_effect=fake_refresh
+            )
 
             result = await monitor._load_current_window_sessions()
 
@@ -784,12 +785,18 @@ class TestSessionMonitorSessionRebinding:
         session_id = "sid-restart"
         jsonl_file = tmp_path / "sid-restart.jsonl"
 
-        pre_restart_line = json.dumps(
-            make_jsonl_entry(msg_type="assistant", content="pre-restart")
-        ) + "\n"
-        downtime_line = json.dumps(
-            make_jsonl_entry(msg_type="assistant", content="written while bot was down")
-        ) + "\n"
+        pre_restart_line = (
+            json.dumps(make_jsonl_entry(msg_type="assistant", content="pre-restart"))
+            + "\n"
+        )
+        downtime_line = (
+            json.dumps(
+                make_jsonl_entry(
+                    msg_type="assistant", content="written while bot was down"
+                )
+            )
+            + "\n"
+        )
 
         jsonl_file.write_text(pre_restart_line, encoding="utf-8")
         offset_at_shutdown = jsonl_file.stat().st_size
@@ -860,9 +867,7 @@ class TestSessionMonitorSessionRebinding:
                     json.dumps(make_jsonl_entry(msg_type="assistant", content="live"))
                     + "\n"
                 )
-            messages = await monitor.check_for_updates(
-                {session_id}, bootstrap=False
-            )
+            messages = await monitor.check_for_updates({session_id}, bootstrap=False)
 
         assert [m.text for m in messages if m.message_type == "content"] == ["live"]
 

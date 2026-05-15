@@ -21,7 +21,13 @@ import io
 import logging
 from typing import Any
 
-from telegram import Bot, InputMediaDocument, InputMediaPhoto, LinkPreviewOptions, Message
+from telegram import (
+    Bot,
+    InputMediaDocument,
+    InputMediaPhoto,
+    LinkPreviewOptions,
+    Message,
+)
 from telegram.error import RetryAfter
 
 from ..markdown_v2 import convert_markdown

@@ -196,11 +196,15 @@ class TestWindowBindingGuards:
         assert mgr.is_window_bound_to_thread(100, 1, "@1") is True
         assert mgr.is_window_bound_to_thread(100, 1, "@2") is False
 
-    def test_is_window_not_bound_to_thread_when_unknown(self, mgr: SessionManager) -> None:
+    def test_is_window_not_bound_to_thread_when_unknown(
+        self, mgr: SessionManager
+    ) -> None:
         assert mgr.is_window_bound_to_thread(100, 1, "@1") is False
 
     @pytest.mark.asyncio
-    async def test_resolve_stale_ids_cleans_dead_thread_binding(self, mgr: SessionManager) -> None:
+    async def test_resolve_stale_ids_cleans_dead_thread_binding(
+        self, mgr: SessionManager
+    ) -> None:
         mgr.bind_thread(100, 1, "@dead")
 
         with patch(
@@ -256,7 +260,9 @@ class TestRefreshWindowSession:
         ws.runtime = "claude"
 
         mock_runtime = MagicMock()
-        mock_runtime.discover_session_id = AsyncMock(return_value="fresh-claude-session")
+        mock_runtime.discover_session_id = AsyncMock(
+            return_value="fresh-claude-session"
+        )
 
         with (
             patch.object(mgr, "_refresh_sessions_index", new=AsyncMock()),
@@ -521,7 +527,11 @@ class TestRefreshWindowSession:
 
         with (
             patch.object(mgr, "_refresh_sessions_index", new=AsyncMock()),
-            patch.object(mgr, "_get_session_direct", new=AsyncMock(side_effect=_get_session_direct)),
+            patch.object(
+                mgr,
+                "_get_session_direct",
+                new=AsyncMock(side_effect=_get_session_direct),
+            ),
         ):
             mgr._session_index = {}
             mgr._session_cwd_index = {"new-session": norm_cwd}

@@ -251,8 +251,12 @@ async def test_callback_handler_ignores_stale_query_answer_timeout() -> None:
     }
     update.callback_query.answer = AsyncMock(
         side_effect=[
-            BadRequest("Query is too old and response timeout expired or query id is invalid"),
-            BadRequest("Query is too old and response timeout expired or query id is invalid"),
+            BadRequest(
+                "Query is too old and response timeout expired or query id is invalid"
+            ),
+            BadRequest(
+                "Query is too old and response timeout expired or query id is invalid"
+            ),
         ]
     )
 

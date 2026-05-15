@@ -222,9 +222,7 @@ class SessionMonitor:
     ) -> None:
         self._message_callback = callback
 
-    def add_listener(
-        self, callback: Callable[[NewMessage], Awaitable[None]]
-    ) -> None:
+    def add_listener(self, callback: Callable[[NewMessage], Awaitable[None]]) -> None:
         """Register an extra async listener fanned out alongside the primary callback."""
         self._extra_listeners.append(callback)
 

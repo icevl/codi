@@ -34,9 +34,7 @@ def _baseline_config(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         config_module.config, "web_ui_totp_required", False, raising=False
     )
-    monkeypatch.setattr(
-        config_module.config, "web_ui_totp_secret", "", raising=False
-    )
+    monkeypatch.setattr(config_module.config, "web_ui_totp_secret", "", raising=False)
     monkeypatch.setattr(
         config_module.config, "web_ui_totp_issuer", "CodexBot-Test", raising=False
     )
@@ -107,7 +105,12 @@ def test_list_sessions_returns_windows(
     authed_client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     fake_windows = [
-        TmuxWindow(window_id="@5", window_name="codexbot", cwd="/tmp", pane_current_command="codex"),
+        TmuxWindow(
+            window_id="@5",
+            window_name="codexbot",
+            cwd="/tmp",
+            pane_current_command="codex",
+        ),
     ]
 
     async def fake_list() -> list[TmuxWindow]:

@@ -113,7 +113,9 @@ class SessionManager:
     group_chat_ids: dict[str, int] = field(default_factory=dict)
 
     # session_id -> transcript file path
-    _session_index: dict[str, Path] = field(default_factory=dict, init=False, repr=False)
+    _session_index: dict[str, Path] = field(
+        default_factory=dict, init=False, repr=False
+    )
     # session_id -> normalized cwd
     _session_cwd_index: dict[str, str] = field(
         default_factory=dict, init=False, repr=False
@@ -343,7 +345,9 @@ class SessionManager:
             )
         return user_id
 
-    def _transcript_mtime(self, session_id: str, transcript: Path | None) -> float | None:
+    def _transcript_mtime(
+        self, session_id: str, transcript: Path | None
+    ) -> float | None:
         """Return transcript mtime for a session, loading from disk if needed."""
         cached = self._session_mtime_index.get(session_id)
         if cached is not None:
@@ -893,7 +897,9 @@ class SessionManager:
             interval=config.session_detect_interval,
         )
         if not detected:
-            logger.warning("No Codex session for window %s (stale sid=%s)", window_id, old_sid)
+            logger.warning(
+                "No Codex session for window %s (stale sid=%s)", window_id, old_sid
+            )
             return None
 
         return await self._get_session_direct(state.session_id, state.cwd)
@@ -942,7 +948,9 @@ class SessionManager:
             return False
         return self.get_window_for_thread(user_id, thread_id) == window_id
 
-    def resolve_window_for_thread(self, user_id: int, thread_id: int | None) -> str | None:
+    def resolve_window_for_thread(
+        self, user_id: int, thread_id: int | None
+    ) -> str | None:
         if thread_id is None:
             return None
         return self.get_window_for_thread(user_id, thread_id)

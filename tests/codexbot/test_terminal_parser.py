@@ -78,9 +78,7 @@ class TestExtractInteractiveContent:
         assert "Implement this plan?" in result.content
         assert "Continue planning with the model." in result.content
 
-    def test_exit_plan_mode_current_variant(
-        self, sample_pane_exit_plan_current: str
-    ):
+    def test_exit_plan_mode_current_variant(self, sample_pane_exit_plan_current: str):
         result = extract_interactive_content(sample_pane_exit_plan_current)
         assert result is not None
         assert result.name == "ExitPlanMode"
@@ -124,18 +122,14 @@ class TestExtractInteractiveContent:
         assert result.name == "AskUserQuestion"
         assert "Enter to select" in result.content
 
-    def test_ask_user_current_single(
-        self, sample_pane_ask_user_current_single: str
-    ):
+    def test_ask_user_current_single(self, sample_pane_ask_user_current_single: str):
         result = extract_interactive_content(sample_pane_ask_user_current_single)
         assert result is not None
         assert result.name == "AskUserQuestion"
         assert "Question 1/1" in result.content
         assert "enter to submit answer" in result.content
 
-    def test_ask_user_current_multi(
-        self, sample_pane_ask_user_current_multi: str
-    ):
+    def test_ask_user_current_multi(self, sample_pane_ask_user_current_multi: str):
         result = extract_interactive_content(sample_pane_ask_user_current_multi)
         assert result is not None
         assert result.name == "AskUserQuestion"
@@ -282,13 +276,7 @@ class TestClaudeUIPatterns:
         assert result.name == "WorkspaceTrust"
 
     def test_numbered_menu_fallback(self):
-        pane = (
-            "Some context line\n"
-            "\n"
-            "❯ 1. Option A\n"
-            "  2. Option B\n"
-            "  3. Option C\n"
-        )
+        pane = "Some context line\n\n❯ 1. Option A\n  2. Option B\n  3. Option C\n"
         result = extract_interactive_content(pane, runtime="claude")
         assert result is not None
         # The catch-all NumberedChoice should match when nothing more
@@ -296,17 +284,14 @@ class TestClaudeUIPatterns:
         assert result.name == "NumberedChoice"
 
     def test_no_ui_returns_none(self):
-        assert extract_interactive_content("just plain output\n", runtime="claude") is None
+        assert (
+            extract_interactive_content("just plain output\n", runtime="claude") is None
+        )
 
     def test_claude_runtime_does_not_match_codex_wordings(self):
         # Codex-specific wording ("Implement this plan?") should not be
         # mistakenly classified as a Claude ExitPlanMode prompt.
-        pane = (
-            "Implement this plan?\n"
-            "\n"
-            "❯ 1. Yes\n"
-            "  2. No\n"
-        )
+        pane = "Implement this plan?\n\n❯ 1. Yes\n  2. No\n"
         result = extract_interactive_content(pane, runtime="claude")
         # If anything matches at all, it must be the generic catch-all,
         # never the Claude ExitPlanMode pattern.
@@ -340,12 +325,7 @@ class TestClaudeStartupPrompts:
     def test_unrelated_numbered_menu_does_not_match_startup_prompt(self):
         from codexbot.runtimes.claude import _classify_startup_prompt
 
-        pane = (
-            "Would you like to proceed?\n"
-            "\n"
-            "❯ 1. Yes\n"
-            "  2. No\n"
-        )
+        pane = "Would you like to proceed?\n\n❯ 1. Yes\n  2. No\n"
         assert _classify_startup_prompt(pane) is None
 
 

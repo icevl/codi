@@ -72,6 +72,7 @@ async def start_web_server(
     bus = EventBus()
 
     if monitor is not None:
+
         async def _listener(msg: NewMessage) -> None:
             await session_monitor_listener(bus, msg)
 
@@ -128,9 +129,7 @@ async def start_web_server(
         "Web UI listening on http://%s:%d", config.web_ui_host, config.web_ui_port
     )
 
-    handle = WebServerHandle(
-        server=server, task=task, bus=bus, stream_task=stream_task
-    )
+    handle = WebServerHandle(server=server, task=task, bus=bus, stream_task=stream_task)
     handle.listener = listener_ref
     _handle = handle
     return handle

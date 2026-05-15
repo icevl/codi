@@ -267,9 +267,7 @@ async def _delete_telegram_topic(bot: "Bot | None", window_id: str) -> None:
     for user_id, thread_id in bindings:
         chat_id = session_manager.resolve_chat_id(user_id, thread_id)
         try:
-            await bot.delete_forum_topic(
-                chat_id=chat_id, message_thread_id=thread_id
-            )
+            await bot.delete_forum_topic(chat_id=chat_id, message_thread_id=thread_id)
         except Exception as exc:  # noqa: BLE001
             logger.debug(
                 "delete_forum_topic failed window=%s thread=%s: %s",
@@ -297,7 +295,9 @@ def create_app(
         AuthConfig(
             password=config.web_ui_password,
             secret=config.web_ui_secret,
-            totp_secret=config.web_ui_totp_secret if config.web_ui_totp_required else "",
+            totp_secret=config.web_ui_totp_secret
+            if config.web_ui_totp_required
+            else "",
             totp_issuer=config.web_ui_totp_issuer,
             totp_account=config.web_ui_totp_account,
             cookie_secure_mode=config.web_ui_cookie_secure,
@@ -347,7 +347,9 @@ def create_app(
         cookie = request.cookies.get(COOKIE_NAME)
         subject = auth.verify_cookie(cookie)
         if not subject:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="unauthorized")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, detail="unauthorized"
+            )
         return subject
 
     # -----------------------------------------------------------------------
@@ -398,7 +400,9 @@ def create_app(
         req: LoginRequest, request: Request, response: Response
     ) -> dict[str, Any]:
         if not auth.enabled:
-            raise HTTPException(status_code=503, detail="web UI disabled (no WEB_UI_PASSWORD set)")
+            raise HTTPException(
+                status_code=503, detail="web UI disabled (no WEB_UI_PASSWORD set)"
+            )
 
         ip = _client_ip(request)
         if _login_locked(ip):
@@ -409,9 +413,7 @@ def create_app(
             )
 
         password_ok = auth.check_password(req.password)
-        totp_ok = (
-            auth.check_totp(req.totp_code or "") if auth.totp_enabled else True
-        )
+        totp_ok = auth.check_totp(req.totp_code or "") if auth.totp_enabled else True
 
         if not (password_ok and totp_ok):
             _login_record_failure(ip)
@@ -459,7 +461,9 @@ def create_app(
         for w in windows:
             ws = session_manager.get_window_state(w.window_id)
             runtime_name = ws.runtime or "codex"
-            display_name = session_manager.get_display_name(w.window_id) or w.window_name
+            display_name = (
+                session_manager.get_display_name(w.window_id) or w.window_name
+            )
             last_activity: float | None = None
             if ws.session_id:
                 mtime = session_manager._session_mtime_index.get(ws.session_id)
@@ -532,7 +536,9 @@ def create_app(
                 session_manager.mark_window_for_new_session(wid, clear_existing=False)
             detect_timeout = 15.0 if req.resume_session_id else 5.0
             try:
-                await session_manager.wait_for_session_map_entry(wid, timeout=detect_timeout)
+                await session_manager.wait_for_session_map_entry(
+                    wid, timeout=detect_timeout
+                )
             except Exception as exc:  # noqa: BLE001
                 logger.debug("session detect raised %s", exc)
             if req.resume_session_id:
@@ -691,7 +697,9 @@ def create_app(
         if proc.returncode != 0:
             return {"is_repo": False, "current": None, "branches": []}
         branches = [
-            line for line in stdout.decode("utf-8", errors="replace").splitlines() if line
+            line
+            for line in stdout.decode("utf-8", errors="replace").splitlines()
+            if line
         ]
         # Reuse the same single-shot command as /git so the "current" marker
         # in the dropdown stays consistent.
@@ -743,7 +751,9 @@ def create_app(
         if proc.returncode != 0:
             # Surface stderr so the UI can show "your local changes would be
             # overwritten…" or similar verbatim — that's the actionable bit.
-            msg = stderr.decode("utf-8", errors="replace").strip() or "git switch failed"
+            msg = (
+                stderr.decode("utf-8", errors="replace").strip() or "git switch failed"
+            )
             raise HTTPException(409, detail=msg)
         return {
             "ok": True,
@@ -853,10 +863,16 @@ def create_app(
     # -------------------------------------------------------------------
 
     @app.get("/api/runtimes")
-    async def list_runtimes_endpoint(_user: str = Depends(require_auth)) -> dict[str, Any]:
+    async def list_runtimes_endpoint(
+        _user: str = Depends(require_auth),
+    ) -> dict[str, Any]:
         return {
             "runtimes": [
-                {"name": r.name, "display_name": r.display_name, "emoji": r.display_emoji}
+                {
+                    "name": r.name,
+                    "display_name": r.display_name,
+                    "emoji": r.display_emoji,
+                }
                 for r in all_runtimes()
             ]
         }
@@ -923,9 +939,7 @@ def create_app(
         origin = websocket.headers.get("origin")
         host = websocket.headers.get("host", "")
         if not auth.origin_allowed(origin, request_host=host):
-            logger.info(
-                "Rejected WS handshake: origin=%r host=%r", origin, host
-            )
+            logger.info("Rejected WS handshake: origin=%r host=%r", origin, host)
             await websocket.close(code=4403)
             return
         cookie = websocket.cookies.get(COOKIE_NAME)
@@ -935,7 +949,9 @@ def create_app(
         await websocket.accept()
         queue = bus.subscribe()
         try:
-            await websocket.send_json({"type": "hello", "ts": asyncio.get_event_loop().time()})
+            await websocket.send_json(
+                {"type": "hello", "ts": asyncio.get_event_loop().time()}
+            )
             while True:
                 event = await queue.get()
                 await websocket.send_json(event)
@@ -977,6 +993,7 @@ def create_app(
                 return FileResponse(index_html)
             raise HTTPException(404, detail="not found")
     else:
+
         @app.get("/", include_in_schema=False)
         async def dev_placeholder() -> JSONResponse:
             return JSONResponse(
