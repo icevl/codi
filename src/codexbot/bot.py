@@ -191,9 +191,7 @@ UNKNOWN_SINGLE_TOKEN_FALLBACK = (
     "Use `/skillhelp` to pick a skill, then send your message."
 )
 PHOTO_DIMENSION_ERROR = "Photo_invalid_dimensions"
-_SCREENSHOT_RESAMPLE = (
-    Image.Resampling.LANCZOS if hasattr(Image, "Resampling") else Image.LANCZOS
-)
+_SCREENSHOT_RESAMPLE = Image.Resampling.LANCZOS
 SCREENSHOT_PREVIEW_SHRINK_FACTOR = 0.9
 SCREENSHOT_PREVIEW_MAX_ATTEMPTS = 8
 
@@ -2641,6 +2639,10 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             _unknown_single_token_message(unknown_single_token),
         )
         return
+    # `_normalize_text_for_dispatch` returns (str, None) on the happy path
+    # and (None, str) on rejection — pyright can't see that correlation, so
+    # narrow it here explicitly.
+    assert text_to_send is not None
     normalized_single_token_skill = (
         single_token_input is not None
         and not armed_skill
@@ -2919,6 +2921,7 @@ async def _create_and_bind_window(
                         context.user_data.pop("_pending_thread_text", None)
                         context.user_data.pop("_pending_thread_id", None)
                 else:
+                    assert text_to_send is not None
                     send_ok, send_msg = await session_manager.send_to_window(
                         created_wid,
                         text_to_send,
@@ -3547,6 +3550,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                     context.user_data.pop("_pending_thread_text", None)
                     context.user_data.pop("_pending_thread_id", None)
             else:
+                assert text_to_send is not None
                 send_ok, send_msg = await session_manager.send_to_window(
                     selected_wid, text_to_send
                 )

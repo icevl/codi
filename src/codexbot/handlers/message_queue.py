@@ -312,7 +312,9 @@ def get_diagnostic_events(
     return list(_completion_diagnostic_events.get(_queue_key(user_id, thread_id), []))
 
 
-def get_queue_health(user_id: int, thread_id: int | None = None) -> dict[str, object]:
+def get_queue_health(
+    user_id: int, thread_id: int | None = None
+) -> dict[str, int | float | bool]:
     """Return queue health snapshot for diagnostics."""
     key = _queue_key(user_id, thread_id)
     queue = _message_queues.get(key)
@@ -338,7 +340,9 @@ def format_diagnostic_events(
         return []
     output: list[str] = []
     for event in events[-max_events:]:
-        ts = time.strftime("%H:%M:%S", time.localtime(float(event.get("timestamp", 0))))
+        raw_ts = event.get("timestamp", 0)
+        ts_value = float(raw_ts) if isinstance(raw_ts, (int, float)) else 0.0
+        ts = time.strftime("%H:%M:%S", time.localtime(ts_value))
         turn = event.get("turn_id")
         reason = event.get("reason")
         output.append(
