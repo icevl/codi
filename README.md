@@ -1,5 +1,8 @@
 # Codi
 
+[![Repo](https://img.shields.io/badge/github-icevl%2Fcodi-181717?logo=github)](https://github.com/icevl/codi)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 > Self-hosted remote control for AI coding agents — Codex and Claude Code running in tmux, driven from a browser or Telegram, in sync.
 
 Codi is a thin control layer over **tmux** that lets you start, monitor, and steer terminal-based AI agents (Codex, Claude Code) from anywhere. Sessions live in tmux on your own machine — Codi just reads their output and sends keystrokes. Two front-ends ship out of the box and stay mirrored:
@@ -114,10 +117,10 @@ The Python backend uses FastAPI for the web transport and `python-telegram-bot` 
 
 ```bash
 # Using uv (recommended)
-uv tool install git+https://github.com/your-org/codi.git
+uv tool install git+https://github.com/icevl/codi.git
 
 # Or from source
-git clone https://github.com/your-org/codi.git
+git clone https://github.com/icevl/codi.git
 cd codi
 uv sync
 ```
