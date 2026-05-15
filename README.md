@@ -2,8 +2,6 @@
 
 > Self-hosted remote control for AI coding agents — Codex and Claude Code running in tmux, driven from a browser or Telegram, in sync.
 
-https://github.com/user-attachments/assets/15ffb38e-5eb9-4720-93b9-412e4961dc93
-
 Codi is a thin control layer over **tmux** that lets you start, monitor, and steer terminal-based AI agents (Codex, Claude Code) from anywhere. Sessions live in tmux on your own machine — Codi just reads their output and sends keystrokes. Two front-ends ship out of the box and stay mirrored:
 
 - a **web UI** (Vite + React) accessible from any browser, and
