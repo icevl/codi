@@ -1,0 +1,26 @@
+services:
+  codi:
+    build:
+      context: .
+    image: codi:local
+    container_name: codi
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      CODEXBOT_DIR: /root/.codexbot
+      CODEX_HOME: /root/.codex
+      # Listen on all interfaces inside the container so the host
+      # port mapping below actually reaches the web UI.
+      WEB_UI_HOST: 0.0.0.0
+    ports:
+      - "${WEB_UI_PORT:-8787}:8787"
+    volumes:
+      - ${HOME}/.codex:/root/.codex
+      - ${HOME}/.claude:/root/.claude
+      - ${HOME}/.codexbot:/root/.codexbot
+      # Mount the directory you want Codi to browse for new sessions.
+      # Override with CODI_PROJECTS_DIR in .env to point elsewhere.
+      - ${CODI_PROJECTS_DIR:-${HOME}/Projects}:/Projects
+      - ./:/workspace/codi
+    working_dir: /workspace/codi
