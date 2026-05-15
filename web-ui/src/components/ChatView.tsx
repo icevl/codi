@@ -9,7 +9,15 @@ import {
   useRef,
   useState,
 } from "react";
-import { Camera, Keyboard, Menu, Paperclip, Pencil, X } from "lucide-react";
+import {
+  Camera,
+  GitCommit,
+  Keyboard,
+  Menu,
+  Paperclip,
+  Pencil,
+  X,
+} from "lucide-react";
 import { api, SessionMessage, SessionSummary, WsEvent } from "../api";
 import { SkillsModal } from "./SkillsModal";
 import { Markdown } from "./Markdown";
@@ -23,6 +31,8 @@ interface Props {
   onRequestScreenshot: () => void;
   onRequestKill: () => void;
   onOpenSidebar: () => void;
+  onToggleDiff: () => void;
+  diffOpen: boolean;
   onRename: (name: string) => Promise<void>;
   showToast: (text: string, kind?: "info" | "error") => void;
 }
@@ -117,6 +127,8 @@ export function ChatView({
   onRequestScreenshot,
   onRequestKill,
   onOpenSidebar,
+  onToggleDiff,
+  diffOpen,
   onRename,
   showToast,
 }: Props) {
@@ -653,6 +665,18 @@ export function ChatView({
           <div className="path">{session.cwd || "—"}</div>
         </div>
         <div className="chat-actions">
+          {gitIsRepo && (
+            <button
+              className={`with-icon${diffOpen ? " active" : ""}`}
+              onClick={onToggleDiff}
+              aria-label="Toggle diff panel"
+              aria-pressed={diffOpen}
+              title="Uncommitted diff"
+            >
+              <GitCommit size={ICON} />
+              <span className="btn-label">Diff</span>
+            </button>
+          )}
           <button
             className="with-icon"
             onClick={onRequestScreenshot}

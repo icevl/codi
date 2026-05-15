@@ -215,6 +215,15 @@ export const api = {
       `/api/sessions/${encodeURIComponent(windowId)}/switch-branch`,
       { method: "POST", json: { branch } },
     ),
+  getDiff: (windowId: string) =>
+    request<{
+      is_repo: boolean;
+      diff: string;
+      additions: number;
+      deletions: number;
+      file_count: number;
+      untracked: string[];
+    }>(`/api/sessions/${encodeURIComponent(windowId)}/diff`),
 };
 
 export type WsEvent =

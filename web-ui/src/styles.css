@@ -98,6 +98,12 @@ button.with-icon {
   gap: 6px;
 }
 
+button.with-icon.active {
+  background: var(--bg-3);
+  border-color: var(--border-strong);
+  color: var(--accent);
+}
+
 button.icon-button {
   display: inline-flex;
   align-items: center;
@@ -200,9 +206,16 @@ a {
 /* App shell */
 .app-shell {
   display: grid;
-  grid-template-columns: 280px 1fr;
+  /* Always reserve a column for the diff panel — width 0 when closed —
+     so the DiffPanel element doesn't wrap to a new grid row. */
+  grid-template-columns: 280px 1fr 0;
   height: 100%;
   width: 100%;
+  transition: grid-template-columns 0.18s ease;
+}
+
+.app-shell.diff-open {
+  grid-template-columns: 280px 1fr min(440px, 38vw);
 }
 
 .sidebar {
@@ -1169,6 +1182,150 @@ button.burger {
   background: var(--border-strong);
 }
 
+/* Diff panel — slides in from the right and takes its own grid column on desktop. */
+.diff-panel {
+  background: var(--bg-1);
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.diff-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  min-height: 60px;
+  border-bottom: 1px solid var(--border);
+}
+
+.diff-panel-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  color: var(--text-0);
+}
+
+.diff-panel-stats {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-2);
+  margin-right: auto;
+}
+
+.diff-stat-add {
+  color: var(--ok);
+  font-family: var(--font-mono);
+}
+
+.diff-stat-del {
+  color: var(--danger);
+  font-family: var(--font-mono);
+}
+
+.diff-panel-body {
+  flex: 1;
+  overflow: auto;
+  padding: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.diff-panel-empty {
+  padding: 16px;
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+.diff-pre {
+  margin: 0;
+  padding: 8px 12px;
+  white-space: pre;
+  background: var(--bg-0);
+  /* Size to widest line so the +/- and hunk backgrounds extend across the
+     horizontally scrolled area instead of cutting off at the panel's
+     visible width. min-width: 100% ensures short lines still fill on
+     the visible area. */
+  display: block;
+  width: max-content;
+  min-width: 100%;
+}
+
+.diff-line {
+  display: block;
+}
+
+.diff-line-file {
+  display: block;
+  color: var(--text-0);
+  background: var(--bg-3);
+  padding: 4px 6px;
+  margin: 6px -12px 0;
+  font-weight: 600;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.diff-line-hunk {
+  color: var(--accent);
+  background: rgba(56, 139, 253, 0.08);
+}
+
+.diff-line-meta {
+  color: var(--text-2);
+}
+
+.diff-line-add {
+  color: #aff5b4;
+  background: rgba(63, 185, 80, 0.12);
+}
+
+.diff-line-del {
+  color: #ffc1ba;
+  background: rgba(248, 81, 73, 0.12);
+}
+
+.diff-untracked {
+  padding: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.diff-untracked-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-2);
+  margin-bottom: 6px;
+}
+
+.diff-untracked ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.diff-untracked li {
+  padding: 2px 0;
+  color: var(--ok);
+}
+
+.spin {
+  animation: diff-spin 0.7s linear infinite;
+}
+
+@keyframes diff-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 /* Mobile layout: collapse sidebar into a slide-in drawer with a burger toggle. */
 @media (max-width: 760px) {
   body {
@@ -1178,6 +1335,26 @@ button.burger {
   .app-shell {
     grid-template-columns: 1fr;
     position: relative;
+  }
+
+  .app-shell.diff-open {
+    /* Mobile: panel is a fixed overlay, no grid column. */
+    grid-template-columns: 1fr;
+  }
+
+  .diff-panel {
+    position: fixed;
+    inset: 0;
+    width: 100vw;
+    z-index: 110;
+    transform: translateX(100%);
+    transition: transform 0.2s ease;
+    box-shadow: var(--shadow);
+    border-left: none;
+  }
+
+  .app-shell.diff-open .diff-panel {
+    transform: translateX(0);
   }
 
   .sidebar {

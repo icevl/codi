@@ -13,6 +13,7 @@ Endpoints (all under `/api` unless stated):
   GET  /api/sessions/{wid}/git       {is_repo, branch} for the pane's cwd
   GET  /api/sessions/{wid}/branches  {is_repo, current, branches[]} — local heads
   POST /api/sessions/{wid}/switch-branch {branch} — runs `git switch`
+  GET  /api/sessions/{wid}/diff       uncommitted diff vs HEAD + untracked list
   POST /api/sessions/{wid}/text      {text, enter?, armed_skill?}
   POST /api/sessions/{wid}/keys      {key} — Escape, Up, Down, Enter, C-c, …
   POST /api/sessions/{wid}/command   {command} — forwards "/clear", "/new" etc.
@@ -759,6 +760,85 @@ def create_app(
             "ok": True,
             "branch": branch,
             "stdout": stdout.decode("utf-8", errors="replace").strip(),
+        }
+
+    @app.get("/api/sessions/{window_id}/diff")
+    async def get_diff(
+        window_id: str, _user: str = Depends(require_auth)
+    ) -> dict[str, Any]:
+        cwd = await _resolve_window_cwd(window_id)
+        empty = {
+            "is_repo": False,
+            "diff": "",
+            "additions": 0,
+            "deletions": 0,
+            "file_count": 0,
+            "untracked": [],
+        }
+        if not cwd:
+            return empty
+        try:
+            # `git diff HEAD` captures staged + unstaged changes. We also
+            # collect untracked names separately so they show up in the panel
+            # even though they have no diff.
+            diff_proc = await asyncio.create_subprocess_exec(
+                "git",
+                "-C",
+                cwd,
+                "diff",
+                "HEAD",
+                "--no-color",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            untracked_proc = await asyncio.create_subprocess_exec(
+                "git",
+                "-C",
+                cwd,
+                "ls-files",
+                "--others",
+                "--exclude-standard",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            diff_bytes, _ = await asyncio.wait_for(
+                diff_proc.communicate(), timeout=5.0
+            )
+            untracked_bytes, _ = await asyncio.wait_for(
+                untracked_proc.communicate(), timeout=2.0
+            )
+        except (FileNotFoundError, asyncio.TimeoutError):
+            return empty
+        if diff_proc.returncode != 0:
+            # 128 = not a repo / no HEAD. Treat as empty rather than erroring.
+            return empty
+
+        diff_text = diff_bytes.decode("utf-8", errors="replace")
+        untracked = [
+            line
+            for line in untracked_bytes.decode("utf-8", errors="replace").splitlines()
+            if line
+        ]
+        # Cheap stats by scanning the diff lines. Skips diff/index/+++/--- headers.
+        additions = 0
+        deletions = 0
+        file_count = 0
+        for line in diff_text.splitlines():
+            if line.startswith("diff --git "):
+                file_count += 1
+            elif line.startswith("+++") or line.startswith("---"):
+                continue
+            elif line.startswith("+"):
+                additions += 1
+            elif line.startswith("-"):
+                deletions += 1
+        return {
+            "is_repo": True,
+            "diff": diff_text,
+            "additions": additions,
+            "deletions": deletions,
+            "file_count": file_count,
+            "untracked": untracked,
         }
 
     # -------------------------------------------------------------------

@@ -4,6 +4,7 @@ import { EventStream } from "./ws";
 import { Login } from "./components/Login";
 import { Sidebar } from "./components/Sidebar";
 import { ChatView } from "./components/ChatView";
+import { DiffPanel } from "./components/DiffPanel";
 import { NewSessionDialog } from "./components/NewSessionDialog";
 import { ScreenshotModal } from "./components/ScreenshotModal";
 import { ConfirmDialog } from "./components/ConfirmDialog";
@@ -51,6 +52,7 @@ export function App() {
   const [killTarget, setKillTarget] = useState<SessionSummary | null>(null);
   const [renameTarget, setRenameTarget] = useState<SessionSummary | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [diffOpen, setDiffOpen] = useState(false);
   const [toast, setToast] = useState<{ kind: "info" | "error"; text: string } | null>(
     null,
   );
@@ -325,7 +327,11 @@ export function App() {
   }
 
   return (
-    <div className={`app-shell${sidebarOpen ? " sidebar-open" : ""}`}>
+    <div
+      className={`app-shell${sidebarOpen ? " sidebar-open" : ""}${
+        diffOpen && activeSession ? " diff-open" : ""
+      }`}
+    >
       <Sidebar
         sessions={sessions}
         activeId={activeId}
@@ -348,23 +354,32 @@ export function App() {
         aria-hidden="true"
       />
       {activeSession ? (
-        <ChatView
-          session={activeSession}
-          subscribeWs={subscribeWs}
-          onRequestScreenshot={() => setScreenshotFor(activeSession.window_id)}
-          onRequestKill={() => setKillTarget(activeSession)}
-          onOpenSidebar={() => setSidebarOpen(true)}
-          onRename={async (name) => {
-            try {
-              await api.renameSession(activeSession.window_id, name);
-              await refreshSessions();
-              showToast("Renamed");
-            } catch (err) {
-              showToast((err as Error).message, "error");
-            }
-          }}
-          showToast={showToast}
-        />
+        <>
+          <ChatView
+            session={activeSession}
+            subscribeWs={subscribeWs}
+            onRequestScreenshot={() => setScreenshotFor(activeSession.window_id)}
+            onRequestKill={() => setKillTarget(activeSession)}
+            onOpenSidebar={() => setSidebarOpen(true)}
+            onToggleDiff={() => setDiffOpen((v) => !v)}
+            diffOpen={diffOpen}
+            onRename={async (name) => {
+              try {
+                await api.renameSession(activeSession.window_id, name);
+                await refreshSessions();
+                showToast("Renamed");
+              } catch (err) {
+                showToast((err as Error).message, "error");
+              }
+            }}
+            showToast={showToast}
+          />
+          <DiffPanel
+            windowId={activeSession.window_id}
+            open={diffOpen}
+            onClose={() => setDiffOpen(false)}
+          />
+        </>
       ) : (
         <main className="chat-area">
           <div className="chat-header">
