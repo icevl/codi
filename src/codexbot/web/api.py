@@ -801,9 +801,7 @@ def create_app(
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL,
             )
-            diff_bytes, _ = await asyncio.wait_for(
-                diff_proc.communicate(), timeout=5.0
-            )
+            diff_bytes, _ = await asyncio.wait_for(diff_proc.communicate(), timeout=5.0)
             untracked_bytes, _ = await asyncio.wait_for(
                 untracked_proc.communicate(), timeout=2.0
             )

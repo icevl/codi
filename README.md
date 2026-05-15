@@ -338,6 +338,16 @@ cd web-ui && pnpm install && pnpm dev
 uv run pytest
 ```
 
+A `pre-push` git hook in `scripts/git-hooks/` mirrors the CI checks
+(ruff, pyright, pytest) so they run automatically before every push.
+Enable it once per clone:
+
+```bash
+git config core.hooksPath scripts/git-hooks
+```
+
+Bypass in a pinch with `git push --no-verify`.
+
 ---
 
 ## License
