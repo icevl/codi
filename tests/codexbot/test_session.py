@@ -649,7 +649,8 @@ class TestSessionDiscoveryFallback:
             await mgr.load_session_map()
 
         assert mgr.get_window_state("@1").session_id == "sid-fallback"
-        mock_fallback.assert_awaited_once_with("/private/tmp")
+        # On macOS /tmp resolves to /private/tmp; on Linux it stays /tmp.
+        mock_fallback.assert_awaited_once_with(mgr._normalize_cwd("/tmp"))
         mock_wait.assert_not_awaited()
 
     @pytest.mark.asyncio
