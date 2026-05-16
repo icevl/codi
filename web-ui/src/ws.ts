@@ -24,20 +24,29 @@ export class EventStream {
         console.warn("ws parse error", err);
       }
     };
-    ws.onclose = () => {
-      this.socket = null;
-      if (this.closed) return;
-      this.retryTimer = window.setTimeout(() => {
-        this.retryDelay = Math.min(this.retryDelay * 1.6, 10_000);
-        this.start();
-      }, this.retryDelay);
-    };
+    ws.onclose = () => this.scheduleReconnect();
     ws.onopen = () => {
       this.retryDelay = 1000;
     };
     ws.onerror = () => {
-      // close handler retries
+      // Browsers normally fire `close` after `error`, but if a connection
+      // never completes we still want to retry — guard with the same
+      // scheduler (no-op if `close` already armed it).
+      this.scheduleReconnect();
     };
+  }
+
+  private scheduleReconnect() {
+    this.socket = null;
+    if (this.closed || this.retryTimer !== null) return;
+    // ±50% jitter so multiple tabs / clients don't reconnect in lockstep
+    // after a server outage.
+    const jitter = 0.5 + Math.random();
+    this.retryTimer = window.setTimeout(() => {
+      this.retryTimer = null;
+      this.retryDelay = Math.min(this.retryDelay * 1.6, 10_000);
+      this.start();
+    }, this.retryDelay * jitter);
   }
 
   stop() {

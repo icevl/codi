@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { GitCommit, RefreshCw, X } from "lucide-react";
 import { api } from "../api";
 
@@ -33,36 +33,47 @@ export function DiffPanel({ windowId, open, onClose }: Props) {
   const [state, setState] = useState<DiffState>(EMPTY);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Ref instead of state so updates inside the polling closure don't
+  // trigger the effect to restart the interval.
+  const etagRef = useRef<string | null>(null);
+
+  const fetchDiff = useCallback(async () => {
+    setLoading(true);
+    try {
+      const r = await api.getDiff(windowId, etagRef.current);
+      if (r.etag) etagRef.current = r.etag;
+      if (r.status === 200) {
+        setState(r.data);
+      }
+      setError(null);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }, [windowId]);
 
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
-    const fetchDiff = async () => {
-      setLoading(true);
-      try {
-        const r = await api.getDiff(windowId);
-        if (cancelled) return;
-        setState(r);
-        setError(null);
-      } catch (err) {
-        if (cancelled) return;
-        setError((err as Error).message);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
+    const tick = async () => {
+      if (cancelled) return;
+      await fetchDiff();
     };
-    fetchDiff();
-    const t = setInterval(fetchDiff, POLL_MS);
+    tick();
+    const t = setInterval(tick, POLL_MS);
     return () => {
       cancelled = true;
       clearInterval(t);
     };
-  }, [open, windowId]);
+  }, [open, fetchDiff]);
 
-  // Reset cached state when switching to a different window so we don't
-  // briefly flash the previous repo's diff.
+  // Reset cached state and ETag when switching to a different window so we
+  // don't briefly flash the previous repo's diff (or send a stale ETag the
+  // server can't match).
   useEffect(() => {
     setState(EMPTY);
+    etagRef.current = null;
   }, [windowId]);
 
   return (
@@ -86,7 +97,7 @@ export function DiffPanel({ windowId, open, onClose }: Props) {
         <button
           type="button"
           className="icon-button"
-          onClick={() => api.getDiff(windowId).then(setState).catch(() => {})}
+          onClick={fetchDiff}
           title="Refresh"
           aria-label="Refresh"
         >

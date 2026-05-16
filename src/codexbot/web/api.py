@@ -30,6 +30,7 @@ Static assets (the built React app) are served from `web-ui/dist/` if present.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -764,8 +765,11 @@ def create_app(
 
     @app.get("/api/sessions/{window_id}/diff")
     async def get_diff(
-        window_id: str, _user: str = Depends(require_auth)
-    ) -> dict[str, Any]:
+        window_id: str,
+        request: Request,
+        response: Response,
+        _user: str = Depends(require_auth),
+    ) -> Any:
         cwd = await _resolve_window_cwd(window_id)
         empty = {
             "is_repo": False,
@@ -817,6 +821,21 @@ def create_app(
             for line in untracked_bytes.decode("utf-8", errors="replace").splitlines()
             if line
         ]
+        # Weak ETag over diff text + untracked list. Weak (`W/`) because we
+        # don't promise byte-for-byte representation equality — the JSON
+        # envelope keys could be reordered by serializer changes, but the
+        # *content* is stable, which is all the client cares about.
+        digest = hashlib.sha1(
+            (diff_text + "\n\x00\n" + "\n".join(untracked)).encode("utf-8"),
+            usedforsecurity=False,
+        ).hexdigest()
+        etag = f'W/"{digest}"'
+
+        if request.headers.get("if-none-match") == etag:
+            # No body on 304 — saves the diff payload (can be MB on big
+            # WIPs) when the client already has the latest snapshot.
+            return Response(status_code=304, headers={"ETag": etag})
+
         # Cheap stats by scanning the diff lines. Skips diff/index/+++/--- headers.
         additions = 0
         deletions = 0
@@ -830,6 +849,7 @@ def create_app(
                 additions += 1
             elif line.startswith("-"):
                 deletions += 1
+        response.headers["ETag"] = etag
         return {
             "is_repo": True,
             "diff": diff_text,

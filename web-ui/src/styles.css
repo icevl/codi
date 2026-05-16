@@ -40,7 +40,11 @@ body,
 #root {
   margin: 0;
   padding: 0;
-  height: 100%;
+  /* `100dvh` shrinks when iOS Safari opens the virtual keyboard, unlike
+     `100%`/`100vh` which keep the original viewport and let the layout
+     scroll off-screen. Fallback to `100vh` for browsers without `dvh`. */
+  height: 100vh;
+  height: 100dvh;
   width: 100%;
   background: var(--bg-0);
   color: var(--text-0);
@@ -1330,6 +1334,15 @@ button.burger {
 @media (max-width: 760px) {
   body {
     font-size: 15px;
+  }
+
+  /* iOS Safari zooms when an input/textarea has computed font-size < 16px,
+     and after the field blurs the page doesn't always zoom back. Force 16px
+     on form controls in mobile widths to suppress the heuristic entirely. */
+  input,
+  textarea,
+  select {
+    font-size: 16px;
   }
 
   .app-shell {

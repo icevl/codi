@@ -215,15 +215,47 @@ export const api = {
       `/api/sessions/${encodeURIComponent(windowId)}/switch-branch`,
       { method: "POST", json: { branch } },
     ),
-  getDiff: (windowId: string) =>
-    request<{
-      is_repo: boolean;
-      diff: string;
-      additions: number;
-      deletions: number;
-      file_count: number;
-      untracked: string[];
-    }>(`/api/sessions/${encodeURIComponent(windowId)}/diff`),
+  getDiff: async (
+    windowId: string,
+    etag?: string | null,
+  ): Promise<
+    | {
+        status: 304;
+        etag: string | null;
+        data: null;
+      }
+    | {
+        status: 200;
+        etag: string | null;
+        data: {
+          is_repo: boolean;
+          diff: string;
+          additions: number;
+          deletions: number;
+          file_count: number;
+          untracked: string[];
+        };
+      }
+  > => {
+    const headers: Record<string, string> = { Accept: "application/json" };
+    if (etag) headers["If-None-Match"] = etag;
+    const res = await fetch(
+      `/api/sessions/${encodeURIComponent(windowId)}/diff`,
+      { credentials: "include", headers },
+    );
+    if (res.status === 401) {
+      const err = new Error("unauthorized");
+      (err as Error & { code?: number }).code = 401;
+      throw err;
+    }
+    const newEtag = res.headers.get("ETag");
+    if (res.status === 304) {
+      return { status: 304, etag: newEtag, data: null };
+    }
+    if (!res.ok) throw new Error(res.statusText);
+    const data = await res.json();
+    return { status: 200, etag: newEtag, data };
+  },
 };
 
 export type WsEvent =

@@ -13,12 +13,42 @@ import { Toast } from "./components/Toast";
 
 type AuthState = "loading" | "anon" | "authed";
 
+// Window-id-as-URL routing: paths like `/t/<window_id>` activate that
+// session on direct load and survive browser back/forward navigation.
+function readWindowIdFromUrl(): string | null {
+  const m = window.location.pathname.match(/^\/t\/(.+)$/);
+  if (!m) return null;
+  try {
+    return decodeURIComponent(m[1]);
+  } catch {
+    return m[1];
+  }
+}
+
 export function App() {
   const [auth, setAuth] = useState<AuthState>("loading");
   const [serverEnabled, setServerEnabled] = useState(true);
   const [totpRequired, setTotpRequired] = useState(false);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
-  const [activeId, setActiveId] = useState<string | null>(null);
+  const [activeId, setActiveId] = useState<string | null>(() =>
+    readWindowIdFromUrl(),
+  );
+
+  // Keep the URL in sync with the active session. Pushing a new entry
+  // means the browser back button navigates between previously-viewed
+  // sessions (and back out to the empty state).
+  useEffect(() => {
+    const next = activeId ? `/t/${encodeURIComponent(activeId)}` : "/";
+    if (window.location.pathname === next) return;
+    window.history.pushState({ activeId }, "", next);
+  }, [activeId]);
+
+  // Sync state when the user navigates with the browser back/forward.
+  useEffect(() => {
+    const onPop = () => setActiveId(readWindowIdFromUrl());
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
   // Windows that are currently streaming (agent working). Cleared on
   // stream_end / completion events.
   const [busyIds, setBusyIds] = useState<Set<string>>(() => new Set());
