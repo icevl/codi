@@ -46,6 +46,15 @@ body,
   height: 100vh;
   height: 100dvh;
   width: 100%;
+  /* iOS Safari/Chrome auto-scales text on orientation/focus changes
+     unless we pin it. Without this an in-focus textarea visually
+     "zooms" even with font-size: 16px. */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  /* Clip any rogue horizontal overflow from grid/transform interactions
+     (e.g. the fixed diff-panel sitting at translateX(100%)) so the page
+     never exposes a horizontal scroll on mobile. */
+  overflow-x: hidden;
   background: var(--bg-0);
   color: var(--text-0);
   font-family: var(--font-sans);
