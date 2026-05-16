@@ -2665,6 +2665,27 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             thread_id,
         )
 
+    # If the pane is currently showing an interactive prompt (AskUserQuestion,
+    # Permission, RestoreCheckpoint, …) the TUI is in menu-mode and will not
+    # accept free-text — letters get consumed as first-letter navigation and
+    # the trailing Enter commits the wrong choice. Detect this lane and press
+    # Escape first so the user's text lands in the regular agent input.
+    interactive_before = get_interactive_window(user.id, thread_id)
+    dismissed_interactive = False
+    if interactive_before == wid:
+        logger.info(
+            "Dismissing interactive prompt before forwarding free text "
+            "user=%d thread=%s window=%s",
+            user.id,
+            thread_id,
+            wid,
+        )
+        await tmux_manager.send_keys(wid, "Escape", enter=False, literal=False)
+        # Tiny gap so the TUI fully tears down the menu before we type.
+        await asyncio.sleep(0.25)
+        await clear_interactive_msg(user.id, context.bot, thread_id)
+        dismissed_interactive = True
+
     success, message = await session_manager.send_to_window(wid, text_to_send)
     await enqueue_status_update(context.bot, user.id, wid, None, thread_id=thread_id)
     if normalized_single_token_skill:
@@ -2718,6 +2739,16 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     if armed_skill:
         _clear_armed_skill(context.user_data, thread_id)
+
+    if dismissed_interactive:
+        try:
+            await safe_reply(
+                update.message,
+                "⚠️ Interactive prompt dismissed (Esc) — your text was forwarded "
+                "as a regular reply.",
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("notice send failed: %s", exc)
 
     # Start background capture for ! bash command output
     if text_to_send.startswith("!") and len(text_to_send) > 1:

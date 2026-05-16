@@ -159,16 +159,41 @@ export function ChatView({
   const branchMenuRef = useRef<HTMLDivElement | null>(null);
   const sessionIdRef = useRef<string | null>(session.session_id);
   const windowIdRef = useRef(session.window_id);
+  // Per-session draft cache. Switching sessions stashes the current
+  // composer text under the previous window_id and restores any draft for
+  // the new one, so each topic keeps its own pending message.
+  const draftsRef = useRef<Record<string, string>>({});
+  const textRef = useRef(text);
+  useEffect(() => {
+    textRef.current = text;
+  }, [text]);
 
   useEffect(() => {
+    const previousWid = windowIdRef.current;
+    if (previousWid && previousWid !== session.window_id) {
+      draftsRef.current[previousWid] = textRef.current;
+    }
     windowIdRef.current = session.window_id;
     sessionIdRef.current = session.session_id;
+    const restored = draftsRef.current[session.window_id] ?? "";
+    setText(restored);
     setNameDraft(session.name);
     setEditingName(false);
     setStreaming(null);
     setAttachments((prev) => {
       for (const a of prev) URL.revokeObjectURL(a.previewUrl);
       return [];
+    });
+    // Focus the composer after the new draft is rendered. Mobile browsers
+    // ignore programmatic focus for keyboard summoning, so this only puts
+    // a caret on desktop — exactly what we want. Defer with a microtask so
+    // the textarea's `value` is the new draft when we move the caret.
+    queueMicrotask(() => {
+      const el = textareaRef.current;
+      if (!el) return;
+      el.focus();
+      const pos = restored.length;
+      el.setSelectionRange(pos, pos);
     });
   }, [session.window_id, session.session_id, session.name]);
 
