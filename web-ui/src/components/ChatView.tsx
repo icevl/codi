@@ -10,6 +10,7 @@ import {
 } from "react";
 import { Virtuoso, VirtuosoHandle } from "react-virtuoso";
 import {
+  Bot,
   Camera,
   ChevronDown,
   GitCommit,
@@ -17,6 +18,7 @@ import {
   Menu,
   Paperclip,
   Pencil,
+  User,
   Users,
   X,
 } from "lucide-react";
@@ -100,25 +102,31 @@ const MessageBubble = memo(function MessageBubble({
   m: ChatMessage;
 }) {
   const t = formatMessageTime(m.timestamp);
+  const isUser = m.role === "user" && m.content_type !== "tool_result";
   return (
-    <div
-      className={`bubble ${m.role} ${m.content_type}${m.pending ? " pending" : ""}`.trim()}
-    >
-      <div className="meta">
-        <span>
-          {m.role}
-          {m.content_type && m.content_type !== "text"
-            ? ` · ${m.content_type}`
-            : ""}
-          {m.pending ? " · sending…" : ""}
-        </span>
-        {t && (
-          <time className="bubble-time" dateTime={m.timestamp} title={t.full}>
-            {t.short}
-          </time>
-        )}
+    <div className={`message-line ${isUser ? "user" : "assistant"}`}>
+      <div className="message-avatar" aria-hidden="true">
+        {isUser ? <User size={16} /> : <Bot size={16} />}
       </div>
-      <Markdown text={m.text} />
+      <div
+        className={`bubble ${m.role} ${m.content_type}${m.pending ? " pending" : ""}`.trim()}
+      >
+        <div className="meta">
+          <span>
+            {m.role}
+            {m.content_type && m.content_type !== "text"
+              ? ` · ${m.content_type}`
+              : ""}
+            {m.pending ? " · sending…" : ""}
+          </span>
+          {t && (
+            <time className="bubble-time" dateTime={m.timestamp} title={t.full}>
+              {t.short}
+            </time>
+          )}
+        </div>
+        <Markdown text={m.text} />
+      </div>
     </div>
   );
 });
@@ -131,9 +139,16 @@ const StreamingBubble = memo(function StreamingBubble({
   status: string;
 }) {
   return (
-    <div className="bubble assistant streaming">
-      <div className="meta">assistant · {status}</div>
-      <pre className="stream-body">{text || "…"}</pre>
+    <div className="messages-row">
+      <div className="message-line assistant">
+        <div className="message-avatar" aria-hidden="true">
+          <Bot size={16} />
+        </div>
+        <div className="bubble assistant streaming">
+          <div className="meta">assistant · {status}</div>
+          <pre className="stream-body">{text || "…"}</pre>
+        </div>
+      </div>
     </div>
   );
 });

@@ -139,8 +139,9 @@ export function Sidebar({
         </div>
       </div>
       <div className="sidebar-actions">
-        <button className="primary with-icon" onClick={onNew}>
-          <Plus size={ICON} /> New
+        <button className="ghost with-icon sidebar-new" onClick={onNew}>
+          <Plus size={ICON} />
+          <span>New session</span>
         </button>
       </div>
       <div className="session-list">
