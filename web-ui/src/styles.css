@@ -26,9 +26,10 @@
   --code-bg: #010409;
   --shadow: 0 8px 24px rgba(1, 4, 9, 0.6);
 
-  --font-sans: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto,
+  --font-sans: "Roboto", -apple-system, BlinkMacSystemFont, "Segoe UI",
     "Helvetica Neue", Arial, sans-serif;
-  --font-mono: "JetBrains Mono", "SF Mono", "Menlo", "Consolas", monospace;
+  --font-mono: "Roboto Mono", "JetBrains Mono", "SF Mono", "Menlo", "Consolas",
+    monospace;
 }
 
 * {
@@ -59,7 +60,8 @@ body,
   color: var(--text-0);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
-  font-size: 14px;
+  font-size: 15px;
+  line-height: 1.5;
 }
 
 button {
@@ -366,7 +368,7 @@ button.burger {
 
 .session-row {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 6px;
 }
 
@@ -580,6 +582,11 @@ button.burger {
   flex-shrink: 0;
 }
 
+.chat-actions button {
+  font-size: 13px;
+  padding: 5px 10px;
+}
+
 .messages {
   /* No padding / scrollbar — Virtuoso owns the scrollable area;
      position: relative anchors the floating "scroll to latest" pill. */
@@ -633,13 +640,13 @@ button.burger {
   margin-bottom: 8px;
 }
 
-.messages-virtuoso > div > div:first-child > .messages-row:first-child {
+/* Class-based first/last padding so it's measured by Virtuoso. A
+   `:first-child` selector would shift as the DOM-first row changes
+   during virtualization. */
+.messages-row-first {
   padding-top: 12px;
 }
 
-/* Bottom gap sits inside the last row's bbox so `scrollTo(MAX)` keeps
-   the gap visible (a separate Footer spacer falls outside the viewport
-   when scrolled to the end). */
 .messages-row-last {
   padding-bottom: 12px;
 }
@@ -728,8 +735,8 @@ button.burger {
   padding: 8px 12px;
   border: 1px solid var(--border);
   background: var(--bubble-assistant);
-  font-size: 14px;
-  line-height: 1.5;
+  font-size: 15px;
+  line-height: 1.55;
   word-wrap: break-word;
   overflow-wrap: anywhere; /* break super-long tokens like paths and hashes */
 }
@@ -868,7 +875,7 @@ button.burger {
 .bubble code,
 .bubble pre {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 13px;
   background: var(--code-bg);
   padding: 2px 4px;
   border-radius: 4px;
@@ -911,18 +918,18 @@ button.burger {
 }
 
 .md h1 {
-  font-size: 18px;
+  font-size: 20px;
 }
 .md h2 {
-  font-size: 16px;
+  font-size: 18px;
 }
 .md h3 {
-  font-size: 15px;
+  font-size: 16px;
 }
 .md h4,
 .md h5,
 .md h6 {
-  font-size: 14px;
+  font-size: 15px;
 }
 
 .md ul,
@@ -1023,7 +1030,7 @@ button.burger {
   color: var(--text-0);
   resize: none;
   font-family: inherit;
-  font-size: 14px;
+  font-size: 15px;
   line-height: 1.5;
   padding: 2px 4px;
 }

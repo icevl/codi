@@ -887,25 +887,29 @@ export function ChatView({
           <Virtuoso
             ref={virtuosoRef}
             data={messages}
-            computeItemKey={(_index, m) =>
-              m.timestamp
-                ? `${m.role}:${m.timestamp}:${m.content_type}`
-                : `${m.role}:${_index}`
-            }
-            itemContent={(index, m) => (
-              <div
-                className={`messages-row${
-                  index === messages.length - 1 && !streaming
-                    ? " messages-row-last"
-                    : ""
-                }`}
-              >
-                <MessageBubble m={m} />
-              </div>
-            )}
+            // Default index keys: role+ts+ct collided when the bot emitted
+            // two messages in the same millisecond, thrashing mount/unmount.
+            itemContent={(index, m) => {
+              const isFirst = index === 0;
+              const isLast = index === messages.length - 1 && !streaming;
+              const cls =
+                "messages-row" +
+                (isFirst ? " messages-row-first" : "") +
+                (isLast ? " messages-row-last" : "");
+              return (
+                <div className={cls}>
+                  <MessageBubble m={m} />
+                </div>
+              );
+            }}
             initialTopMostItemIndex={Math.max(0, messages.length - 1)}
             atBottomStateChange={handleAtBottomChange}
             atBottomThreshold={64}
+            // Bubble heights vary wildly; pixel overscan alone is eaten by
+            // one tall message. Item-count overscan + a reasonable default
+            // height keep first-measurement scroll corrections small.
+            defaultItemHeight={140}
+            minOverscanItemCount={{ top: 12, bottom: 12 }}
             increaseViewportBy={{ top: 800, bottom: 800 }}
             components={VIRTUOSO_COMPONENTS}
             context={streaming}
