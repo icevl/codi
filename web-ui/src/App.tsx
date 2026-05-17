@@ -5,6 +5,7 @@ import { Login } from "./components/Login";
 import { Sidebar } from "./components/Sidebar";
 import { ChatView } from "./components/ChatView";
 import { DiffPanel } from "./components/DiffPanel";
+import { OfficePanel } from "./components/OfficePanel";
 import { NewSessionDialog } from "./components/NewSessionDialog";
 import { ScreenshotModal } from "./components/ScreenshotModal";
 import { ConfirmDialog } from "./components/ConfirmDialog";
@@ -30,6 +31,10 @@ export function App() {
   const [serverEnabled, setServerEnabled] = useState(true);
   const [totpRequired, setTotpRequired] = useState(false);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
+  // Track whether the first /api/sessions response has landed. Until
+  // then we mustn't show an "empty state" — the actual data is just
+  // in-flight, and flashing "No sessions" while it loads is a UX bug.
+  const [sessionsLoaded, setSessionsLoaded] = useState(false);
   const [activeId, setActiveId] = useState<string | null>(() =>
     readWindowIdFromUrl(),
   );
@@ -61,7 +66,13 @@ export function App() {
   // turn as ended. The server polls every ~300ms while active so this delay
   // doesn't flash off during real streaming.
   const busyWatchdogs = useRef<Record<string, number>>({});
-  const BUSY_IDLE_MS = 3000;
+  // Watchdog is a pure safety net for missed events across a WS
+  // reconnect. The authoritative end-of-turn signal is the `completion`
+  // event from the JSONL monitor (Codex `turn_complete` / Claude
+  // `stop_reason=end_turn`). 90s comfortably covers a long-running tool
+  // call without dropping busy; if WS drops and we miss the completion,
+  // we fall back to idle after this timeout.
+  const BUSY_WATCHDOG_MS = 90000;
   // We need the current activeId inside the WS callback, but capturing it
   // through the effect's closure would force re-subscribing the stream on
   // every selection change. A ref bypasses that.
@@ -83,6 +94,7 @@ export function App() {
   const [renameTarget, setRenameTarget] = useState<SessionSummary | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [diffOpen, setDiffOpen] = useState(false);
+  const [officeOpen, setOfficeOpen] = useState(false);
   const [toast, setToast] = useState<{ kind: "info" | "error"; text: string } | null>(
     null,
   );
@@ -128,6 +140,8 @@ export function App() {
         return;
       }
       showToast((err as Error).message, "error");
+    } finally {
+      setSessionsLoaded(true);
     }
   }, [showToast]);
 
@@ -186,10 +200,17 @@ export function App() {
             }
           };
 
-          if (event.type === "stream") {
-            // Agent is actively writing — supersede any prior "done" badge
-            // and (re)arm the watchdog so the spinner can't stick if a
-            // future stream_end is lost across a WS reconnect.
+          // Activity signals from the JSONL monitor: Codex stream chunks
+          // and any assistant/tool message that the transcript parser
+          // surfaces. All re-arm the same watchdog; only `completion`
+          // (from end_turn / turn_complete) clears busy authoritatively.
+          const isActivity =
+            event.type === "stream" ||
+            (event.type === "message" &&
+              (event.role === "assistant" ||
+                !!event.tool_name ||
+                !!event.tool_use_id));
+          if (isActivity) {
             setBusyIds((prev) => {
               if (prev.has(wid)) return prev;
               const next = new Set(prev);
@@ -205,12 +226,9 @@ export function App() {
             clearWatchdog();
             busyWatchdogs.current[wid] = window.setTimeout(
               () => markIdle(/*markDone*/ true),
-              BUSY_IDLE_MS,
+              BUSY_WATCHDOG_MS,
             );
-          } else if (
-            event.type === "stream_end" ||
-            event.type === "completion"
-          ) {
+          } else if (event.type === "completion") {
             markIdle(/*markDone*/ true);
           }
         }
@@ -251,6 +269,7 @@ export function App() {
       setAuth("anon");
       setSessions([]);
       setActiveId(null);
+      setSessionsLoaded(false);
     }
   }, []);
 
@@ -360,10 +379,11 @@ export function App() {
     <div
       className={`app-shell${sidebarOpen ? " sidebar-open" : ""}${
         diffOpen && activeSession ? " diff-open" : ""
-      }`}
+      }${officeOpen && activeSession ? " office-open" : ""}`}
     >
       <Sidebar
         sessions={sessions}
+        sessionsLoaded={sessionsLoaded}
         activeId={activeId}
         busyIds={busyIds}
         doneIds={doneIds}
@@ -393,6 +413,8 @@ export function App() {
             onOpenSidebar={() => setSidebarOpen(true)}
             onToggleDiff={() => setDiffOpen((v) => !v)}
             diffOpen={diffOpen}
+            onToggleOffice={() => setOfficeOpen((v) => !v)}
+            officeOpen={officeOpen}
             onRename={async (name) => {
               try {
                 await api.renameSession(activeSession.window_id, name);
@@ -408,6 +430,15 @@ export function App() {
             windowId={activeSession.window_id}
             open={diffOpen}
             onClose={() => setDiffOpen(false)}
+          />
+          <OfficePanel
+            windowId={activeSession.window_id}
+            sessionName={activeSession.name}
+            busy={busyIds.has(activeSession.window_id)}
+            open={officeOpen}
+            onClose={() => setOfficeOpen(false)}
+            subscribeWs={subscribeWs}
+            showToast={showToast}
           />
         </>
       ) : (
@@ -425,13 +456,20 @@ export function App() {
               <div className="name">Codi</div>
             </div>
           </div>
-          <div className="empty-state">
-            <h2>No active sessions</h2>
-            <p>Create a new one to get started.</p>
-            <button className="primary" onClick={() => setCreating(true)}>
-              + New session
-            </button>
-          </div>
+          {sessionsLoaded ? (
+            <div className="empty-state">
+              <h2>No active sessions</h2>
+              <p>Create a new one to get started.</p>
+              <button className="primary" onClick={() => setCreating(true)}>
+                + New session
+              </button>
+            </div>
+          ) : (
+            <div className="empty-state">
+              <div className="empty-state-spinner" />
+              <p>Loading sessions…</p>
+            </div>
+          )}
         </main>
       )}
 

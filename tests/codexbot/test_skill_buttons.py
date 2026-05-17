@@ -838,6 +838,12 @@ async def test_handle_new_message_completion_creates_completion_message(
         mock_session.file_path = str(transcript)
         mock_sm.resolve_session_for_window = AsyncMock(return_value=mock_session)
         mock_sm.update_user_window_offset = MagicMock()
+        # Runtime drives the completion header label; without an explicit
+        # window state the mock would surface a MagicMock and the bot
+        # would fall back to the generic "Agent" header.
+        mock_window_state = MagicMock()
+        mock_window_state.runtime = "codex"
+        mock_sm.get_window_state = MagicMock(return_value=mock_window_state)
 
         await handle_new_message(completion_msg, mock_bot)
 

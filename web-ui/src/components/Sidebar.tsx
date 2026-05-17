@@ -35,6 +35,10 @@ export function RuntimeIcon({
 
 interface Props {
   sessions: SessionSummary[];
+  // false → first /api/sessions response not yet in. Renders a spinner
+  // in the list instead of the "No sessions yet" empty state, otherwise
+  // we flash an empty list every time the page reloads.
+  sessionsLoaded: boolean;
   activeId: string | null;
   busyIds: Set<string>;
   doneIds: Set<string>;
@@ -59,6 +63,7 @@ function formatRelative(ts: number | null): string {
 
 export function Sidebar({
   sessions,
+  sessionsLoaded,
   activeId,
   busyIds,
   doneIds,
@@ -140,7 +145,14 @@ export function Sidebar({
       </div>
       <div className="session-list">
         {ordered.length === 0 ? (
-          <div className="session-list-empty">No sessions yet.</div>
+          sessionsLoaded ? (
+            <div className="session-list-empty">No sessions yet.</div>
+          ) : (
+            <div className="session-list-empty session-list-loading">
+              <div className="empty-state-spinner small" />
+              <span>Loading…</span>
+            </div>
+          )
         ) : (
           ordered.map((s) => {
             const isOpen = menuFor === s.window_id;

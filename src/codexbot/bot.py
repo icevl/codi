@@ -872,9 +872,14 @@ def _build_skill_board(
     return text, InlineKeyboardMarkup(buttons), page
 
 
-def _build_completion_text(msg: NewMessage) -> str:
+def _build_completion_text(msg: NewMessage, runtime: str | None = None) -> str:
     """Build completion notification text for a completed turn."""
-    parts: list[str] = ["✅ *Codex turn complete*"]
+    # Phase-2 added Claude Code as a second runtime; the notification
+    # header used to be hard-coded to "Codex". Resolve the right label
+    # from the bound window's runtime so each agent gets its own name.
+    label_map = {"claude": "Claude Code", "codex": "Codex"}
+    label = label_map.get(runtime or "", "Agent")
+    parts: list[str] = [f"✅ *{label} turn complete*"]
     if msg.turn_id is not None:
         parts.append(f"Turn: `{msg.turn_id}`")
 
@@ -4313,7 +4318,7 @@ async def handle_new_message(msg: NewMessage, bot: Bot) -> None:
                     bot=bot,
                     user_id=user_id,
                     window_id=wid,
-                    completion_text=_build_completion_text(msg),
+                    completion_text=_build_completion_text(msg, runtime_name),
                     session_id=msg.session_id,
                     turn_id=msg.turn_id,
                     thread_id=thread_id,

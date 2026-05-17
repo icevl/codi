@@ -215,6 +215,20 @@ export const api = {
       `/api/sessions/${encodeURIComponent(windowId)}/switch-branch`,
       { method: "POST", json: { branch } },
     ),
+  getOfficeState: () =>
+    request<{
+      catalog: Record<string, unknown>;
+      layout: { cols: number; rows: number; placements: unknown[] } | null;
+    }>("/api/office/state"),
+  putOfficeState: (body: {
+    catalog: Record<string, unknown>;
+    layout: { cols: number; rows: number; placements: unknown[] } | null;
+  }) =>
+    request<{ ok: boolean; path: string }>("/api/office/state", {
+      method: "PUT",
+      json: body,
+    }),
+
   getDiff: async (
     windowId: string,
     etag?: string | null,

@@ -5,10 +5,10 @@ import {
   memo,
   useCallback,
   useEffect,
-  useLayoutEffect,
   useRef,
   useState,
 } from "react";
+import { Virtuoso, VirtuosoHandle } from "react-virtuoso";
 import {
   Camera,
   GitCommit,
@@ -16,6 +16,7 @@ import {
   Menu,
   Paperclip,
   Pencil,
+  Users,
   X,
 } from "lucide-react";
 import { api, SessionMessage, SessionSummary, WsEvent } from "../api";
@@ -33,6 +34,8 @@ interface Props {
   onOpenSidebar: () => void;
   onToggleDiff: () => void;
   diffOpen: boolean;
+  onToggleOffice: () => void;
+  officeOpen: boolean;
   onRename: (name: string) => Promise<void>;
   showToast: (text: string, kind?: "info" | "error") => void;
 }
@@ -58,31 +61,64 @@ function parseSlashCommand(text: string): string | null {
 
 type ChatMessage = SessionMessage & { pending?: boolean };
 
-// Extracted + memoized so typing in the composer textarea doesn't pay the
-// cost of re-mounting/re-parsing every message bubble through ReactMarkdown.
-const MessageList = memo(function MessageList({
-  messages,
+// Compact time label for a message bubble. Same day → HH:MM; same year
+// but a different day → MMM dd HH:MM; otherwise drops the year in too.
+// Falls back to the raw string if it isn't parseable.
+function formatMessageTime(iso: string | undefined): {
+  short: string;
+  full: string;
+} | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  const now = new Date();
+  const hh = d.getHours().toString().padStart(2, "0");
+  const mm = d.getMinutes().toString().padStart(2, "0");
+  const time = `${hh}:${mm}`;
+  const sameDay =
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate();
+  let short: string;
+  if (sameDay) {
+    short = time;
+  } else if (d.getFullYear() === now.getFullYear()) {
+    short = `${d.toLocaleDateString(undefined, { month: "short", day: "numeric" })} ${time}`;
+  } else {
+    short = `${d.toLocaleDateString()} ${time}`;
+  }
+  return { short, full: d.toLocaleString() };
+}
+
+// Memoized per-message bubble. Virtuoso re-renders the visible window on
+// every scroll tick; without `memo` every bubble would re-parse its
+// Markdown each time and large chats would lock the main thread.
+const MessageBubble = memo(function MessageBubble({
+  m,
 }: {
-  messages: ChatMessage[];
+  m: ChatMessage;
 }) {
+  const t = formatMessageTime(m.timestamp);
   return (
-    <>
-      {messages.map((m, idx) => (
-        <div
-          key={idx}
-          className={`bubble ${m.role} ${m.content_type}${m.pending ? " pending" : ""}`.trim()}
-        >
-          <div className="meta">
-            {m.role}
-            {m.content_type && m.content_type !== "text"
-              ? ` · ${m.content_type}`
-              : ""}
-            {m.pending ? " · sending…" : ""}
-          </div>
-          <Markdown text={m.text} />
-        </div>
-      ))}
-    </>
+    <div
+      className={`bubble ${m.role} ${m.content_type}${m.pending ? " pending" : ""}`.trim()}
+    >
+      <div className="meta">
+        <span>
+          {m.role}
+          {m.content_type && m.content_type !== "text"
+            ? ` · ${m.content_type}`
+            : ""}
+          {m.pending ? " · sending…" : ""}
+        </span>
+        {t && (
+          <time className="bubble-time" dateTime={m.timestamp} title={t.full}>
+            {t.short}
+          </time>
+        )}
+      </div>
+      <Markdown text={m.text} />
+    </div>
   );
 });
 
@@ -100,6 +136,16 @@ const StreamingBubble = memo(function StreamingBubble({
     </div>
   );
 });
+
+// Stable footer component for the virtualized list. Identity stays the
+// same across renders so Virtuoso doesn't remount it on every streaming
+// chunk; the live data flows in through Virtuoso's `context` prop.
+type StreamCtx = { text: string; status: string } | null;
+function VirtuosoStreamingFooter({ context }: { context?: StreamCtx }) {
+  if (!context) return null;
+  return <StreamingBubble text={context.text} status={context.status} />;
+}
+const VIRTUOSO_COMPONENTS = { Footer: VirtuosoStreamingFooter };
 
 const KEY_BUTTONS: Array<{ label: string; key: string }> = [
   { label: "Esc", key: "Escape" },
@@ -129,11 +175,17 @@ export function ChatView({
   onOpenSidebar,
   onToggleDiff,
   diffOpen,
+  onToggleOffice,
+  officeOpen,
   onRename,
   showToast,
 }: Props) {
   const [showSkills, setShowSkills] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  // false while /api/sessions/<wid>/messages is in flight for the
+  // currently selected session. Without this we'd render "No messages
+  // yet" briefly between selecting a session and the history landing.
+  const [historyLoaded, setHistoryLoaded] = useState(false);
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const [editingName, setEditingName] = useState(false);
@@ -152,7 +204,12 @@ export function ChatView({
   const [branchList, setBranchList] = useState<string[] | null>(null);
   const [branchLoadError, setBranchLoadError] = useState<string | null>(null);
   const [switchingBranch, setSwitchingBranch] = useState<string | null>(null);
-  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const virtuosoRef = useRef<VirtuosoHandle | null>(null);
+  // Whether the user is parked at the bottom of the chat. Virtuoso
+  // reports this on every scroll; we use it to decide if a new message
+  // should auto-stick to the bottom (true) or stay where the user is
+  // currently reading (false).
+  const [atBottom, setAtBottom] = useState(true);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const keysMenuRef = useRef<HTMLDivElement | null>(null);
@@ -235,6 +292,7 @@ export function ChatView({
   const loadHistory = useCallback(() => {
     let cancelled = false;
     setMessages([]);
+    setHistoryLoaded(false);
     api
       .getMessages(session.window_id)
       .then((r) => {
@@ -245,6 +303,10 @@ export function ChatView({
       .catch((err: Error) => {
         if (cancelled) return;
         showToast(err.message, "error");
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setHistoryLoaded(true);
       });
     return () => {
       cancelled = true;
@@ -342,12 +404,19 @@ export function ChatView({
     };
   }, [session.window_id]);
 
-  // Auto-scroll on append or stream growth.
-  useLayoutEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    el.scrollTop = el.scrollHeight;
-  }, [messages.length, streaming?.text]);
+  // Auto-stick on append / stream growth, but only when the user is
+  // already parked at the bottom — Virtuoso would otherwise rip the
+  // viewport away from someone reading older history.
+  useEffect(() => {
+    if (!atBottom) return;
+    const handle = virtuosoRef.current;
+    if (!handle) return;
+    handle.scrollToIndex({
+      index: "LAST",
+      behavior: "auto",
+      align: "end",
+    });
+  }, [messages.length, streaming?.text, atBottom]);
 
   // Close the keys/commands popover on outside click or Escape.
   useEffect(() => {
@@ -703,6 +772,16 @@ export function ChatView({
             </button>
           )}
           <button
+            className={`with-icon${officeOpen ? " active" : ""}`}
+            onClick={onToggleOffice}
+            aria-label="Toggle office visualization"
+            aria-pressed={officeOpen}
+            title="Office (agent visualization)"
+          >
+            <Users size={ICON} />
+            <span className="btn-label">Office</span>
+          </button>
+          <button
             className="with-icon"
             onClick={onRequestScreenshot}
             aria-label="Screenshot"
@@ -726,19 +805,43 @@ export function ChatView({
         </div>
       </div>
 
-      <div className="messages" ref={scrollRef}>
+      <div className="messages">
         {messages.length === 0 && !streaming ? (
-          <div className="empty-state">
-            <h2>No messages yet</h2>
-            <p>Send your first prompt below.</p>
-          </div>
+          historyLoaded ? (
+            <div className="empty-state">
+              <h2>No messages yet</h2>
+              <p>Send your first prompt below.</p>
+            </div>
+          ) : (
+            <div className="empty-state">
+              <div className="empty-state-spinner" />
+              <p>Loading messages…</p>
+            </div>
+          )
         ) : (
-          <>
-            <MessageList messages={messages} />
-            {streaming ? (
-              <StreamingBubble text={streaming.text} status={streaming.status} />
-            ) : null}
-          </>
+          <Virtuoso
+            ref={virtuosoRef}
+            data={messages}
+            computeItemKey={(_index, m) =>
+              m.timestamp
+                ? `${m.role}:${m.timestamp}:${m.content_type}`
+                : `${m.role}:${_index}`
+            }
+            itemContent={(_index, m) => <MessageBubble m={m} />}
+            initialTopMostItemIndex={Math.max(0, messages.length - 1)}
+            followOutput={atBottom ? "auto" : false}
+            atBottomStateChange={setAtBottom}
+            atBottomThreshold={64}
+            increaseViewportBy={{ top: 200, bottom: 200 }}
+            // Stable `components` object + live data via `context`. The
+            // Footer reads context and renders the streaming bubble when
+            // present — keeping component identity stable across stream
+            // chunks (otherwise Virtuoso 4.x merges defaults against an
+            // undefined components prop and explodes on EmptyPlaceholder).
+            components={VIRTUOSO_COMPONENTS}
+            context={streaming}
+            className="messages-virtuoso"
+          />
         )}
       </div>
 

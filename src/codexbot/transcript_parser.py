@@ -140,6 +140,24 @@ class TranscriptParser:
         """
         msg_type = data.get("type")
         if msg_type in ("user", "assistant"):
+            # Claude Code marks turn boundaries via `stop_reason: "end_turn"`
+            # on the final assistant message. Append a synthetic completion
+            # content block so the downstream parser emits a NewMessage
+            # with `message_type="completion"` immediately — instead of
+            # making us wait for the next user message before the bus
+            # learns the turn is done.
+            if msg_type == "assistant":
+                message = data.get("message")
+                if isinstance(message, dict):
+                    stop_reason = message.get("stop_reason")
+                    if stop_reason in ("end_turn", "stop_sequence"):
+                        content = message.get("content")
+                        if isinstance(content, list):
+                            new_message = {
+                                **message,
+                                "content": [*content, {"type": "completion"}],
+                            }
+                            return {**data, "message": new_message}
             return data
 
         timestamp = data.get("timestamp")

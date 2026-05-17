@@ -982,6 +982,65 @@ def create_app(
         names = discover_skills(runtime)
         return {"skills": names, "runtime": runtime}
 
+    # -------------------------------------------------------------------
+    # Office viz state — the agent-visualization panel persists its custom
+    # catalog and layout in a project-local JSON file so changes survive
+    # page reloads and (if committed) live in version control. The file is
+    # served via this API rather than as a static asset so writes don't have
+    # to race with the Vite build pipeline. Schema:
+    #   { "catalog": { id -> TileObject }, "layout": OfficeLayout | null }
+    # -------------------------------------------------------------------
+
+    _office_state_path = (
+        Path(__file__).resolve().parents[3]
+        / "web-ui"
+        / "public"
+        / "office"
+        / "state.json"
+    )
+
+    @app.get("/api/office/state")
+    async def get_office_state(
+        _user: str = Depends(require_auth),
+    ) -> dict[str, Any]:
+        path = _office_state_path
+        if not path.exists():
+            return {"catalog": {}, "layout": None}
+        try:
+            with path.open("r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception as exc:
+            logger.warning("office state read failed: %s", exc)
+            return {"catalog": {}, "layout": None}
+        if not isinstance(data, dict):
+            return {"catalog": {}, "layout": None}
+        return {
+            "catalog": data.get("catalog") or {},
+            "layout": data.get("layout"),
+        }
+
+    @app.put("/api/office/state")
+    async def put_office_state(
+        body: dict[str, Any], _user: str = Depends(require_auth)
+    ) -> dict[str, Any]:
+        catalog = body.get("catalog")
+        layout = body.get("layout")
+        if catalog is not None and not isinstance(catalog, dict):
+            raise HTTPException(400, detail="catalog must be an object")
+        if layout is not None and not isinstance(layout, dict):
+            raise HTTPException(400, detail="layout must be an object or null")
+        payload = {"catalog": catalog or {}, "layout": layout}
+        path = _office_state_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".tmp")
+        # Atomic write: write to tmp file then rename so a crashed write
+        # can't leave a half-written JSON behind to confuse the next read.
+        with tmp.open("w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2, ensure_ascii=False)
+            f.write("\n")
+        os.replace(tmp, path)
+        return {"ok": True, "path": str(path.relative_to(path.parents[3]))}
+
     @app.get("/api/directories")
     async def directories(
         path: str = Query("~"), _user: str = Depends(require_auth)
