@@ -554,15 +554,42 @@ button.burger {
 }
 
 .messages {
+  /* No padding / scrollbar — Virtuoso owns the scrollable area;
+     position: relative anchors the floating "scroll to latest" pill. */
   flex: 1;
   min-width: 0;
-  /* No own scrollbar / padding — Virtuoso owns the scrollable area and
-     paints its own viewport. Padding moved onto individual bubbles
-     (margin-bottom for inter-bubble gap) so the virtualized scroller
-     reaches the panel edge cleanly. */
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  position: relative;
+}
+
+.scroll-to-latest {
+  position: absolute;
+  right: 16px;
+  bottom: 12px;
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--bg-1);
+  color: var(--text-0);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: var(--shadow);
+  z-index: 5;
+  transition: transform 0.12s ease, background 0.12s ease;
+}
+
+.scroll-to-latest:hover {
+  background: var(--bg-2);
+  transform: translateY(-1px);
+}
+
+.scroll-to-latest:active {
+  transform: translateY(0);
 }
 
 .messages-virtuoso {
@@ -571,16 +598,27 @@ button.burger {
   width: 100%;
 }
 
-.messages-virtuoso > div[data-testid="virtuoso-item-list"] > div {
+.messages-row {
   padding: 0 18px;
 }
 
-.messages-virtuoso .bubble {
+.messages-row .bubble {
   margin-bottom: 8px;
 }
 
-.messages-virtuoso .bubble:first-child {
-  margin-top: 12px;
+.messages-virtuoso > div > div:first-child > .messages-row:first-child {
+  padding-top: 12px;
+}
+
+.messages-virtuoso .bubble.streaming {
+  margin: 0 18px 12px;
+}
+
+/* Bottom gap sits inside the last row's bbox so `scrollTo(MAX)` keeps
+   the gap visible (a separate Footer spacer falls outside the viewport
+   when scrolled to the end). */
+.messages-row-last {
+  padding-bottom: 12px;
 }
 
 .empty-state {

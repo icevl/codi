@@ -11,6 +11,7 @@ import {
 import { Virtuoso, VirtuosoHandle } from "react-virtuoso";
 import {
   Camera,
+  ChevronDown,
   GitCommit,
   Keyboard,
   Menu,
@@ -137,9 +138,8 @@ const StreamingBubble = memo(function StreamingBubble({
   );
 });
 
-// Stable footer component for the virtualized list. Identity stays the
-// same across renders so Virtuoso doesn't remount it on every streaming
-// chunk; the live data flows in through Virtuoso's `context` prop.
+// Module-scope so Virtuoso 4.x sees a stable `components` identity —
+// inline functions trigger an EmptyPlaceholder crash on next render.
 type StreamCtx = { text: string; status: string } | null;
 function VirtuosoStreamingFooter({ context }: { context?: StreamCtx }) {
   if (!context) return null;
@@ -205,11 +205,27 @@ export function ChatView({
   const [branchLoadError, setBranchLoadError] = useState<string | null>(null);
   const [switchingBranch, setSwitchingBranch] = useState<string | null>(null);
   const virtuosoRef = useRef<VirtuosoHandle | null>(null);
-  // Whether the user is parked at the bottom of the chat. Virtuoso
-  // reports this on every scroll; we use it to decide if a new message
-  // should auto-stick to the bottom (true) or stay where the user is
-  // currently reading (false).
+  const atBottomRef = useRef(true);
   const [atBottom, setAtBottom] = useState(true);
+  const handleAtBottomChange = useCallback((next: boolean) => {
+    atBottomRef.current = next;
+    setAtBottom(next);
+  }, []);
+  // One-shot override that overrides `atBottomRef` for the next scroll
+  // effect — Virtuoso can flip at-bottom to false mid-append before we
+  // scroll past the new item.
+  const forceStickRef = useRef(false);
+
+  const scrollToLatest = useCallback(() => {
+    forceStickRef.current = true;
+    handleAtBottomChange(true);
+    requestAnimationFrame(() => {
+      virtuosoRef.current?.scrollTo({
+        top: Number.MAX_SAFE_INTEGER,
+        behavior: "smooth",
+      });
+    });
+  }, [handleAtBottomChange]);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const keysMenuRef = useRef<HTMLDivElement | null>(null);
@@ -404,19 +420,50 @@ export function ChatView({
     };
   }, [session.window_id]);
 
-  // Auto-stick on append / stream growth, but only when the user is
-  // already parked at the bottom — Virtuoso would otherwise rip the
-  // viewport away from someone reading older history.
+  // Sole authority on stick-to-bottom. Double-RAF lets Virtuoso measure
+  // the new item before we scroll past it; the post-scroll override of
+  // atBottom defeats any late `atBottomStateChange(false)` driven by
+  // the pre-scroll layout.
   useEffect(() => {
-    if (!atBottom) return;
-    const handle = virtuosoRef.current;
-    if (!handle) return;
-    handle.scrollToIndex({
-      index: "LAST",
-      behavior: "auto",
-      align: "end",
+    const force = forceStickRef.current;
+    if (!atBottomRef.current && !force) return;
+    if (messages.length === 0 && !streaming?.text) return;
+    forceStickRef.current = false;
+    let inner = 0;
+    const outer = requestAnimationFrame(() => {
+      inner = requestAnimationFrame(() => {
+        virtuosoRef.current?.scrollTo({
+          top: Number.MAX_SAFE_INTEGER,
+          behavior: "auto",
+        });
+        atBottomRef.current = true;
+        setAtBottom(true);
+      });
     });
-  }, [messages.length, streaming?.text, atBottom]);
+    return () => {
+      cancelAnimationFrame(outer);
+      if (inner) cancelAnimationFrame(inner);
+    };
+  }, [messages.length, streaming?.text]);
+
+  // Virtuoso instance is reused across sessions, so on session change
+  // we have to scroll the new history's bottom into view ourselves.
+  const scrolledForSessionRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!historyLoaded) return;
+    if (scrolledForSessionRef.current === session.window_id) return;
+    scrolledForSessionRef.current = session.window_id;
+    forceStickRef.current = true;
+    const id = requestAnimationFrame(() => {
+      virtuosoRef.current?.scrollTo({
+        top: Number.MAX_SAFE_INTEGER,
+        behavior: "auto",
+      });
+      handleAtBottomChange(true);
+      forceStickRef.current = false;
+    });
+    return () => cancelAnimationFrame(id);
+  }, [historyLoaded, session.window_id, handleAtBottomChange]);
 
   // Close the keys/commands popover on outside click or Escape.
   useEffect(() => {
@@ -594,6 +641,9 @@ export function ChatView({
         ...prev,
         { role: "user", text: optimisticText, content_type: "text", pending: true },
       ]);
+      // Snap to own send regardless of read position (messenger UX).
+      forceStickRef.current = true;
+      handleAtBottomChange(true);
 
       // Clear composer immediately so sending feels instant. Restored on error.
       setText("");
@@ -643,7 +693,7 @@ export function ChatView({
         textareaRef.current?.focus();
       }
     },
-    [session.window_id, showToast, handleBotCommand, attachments],
+    [session.window_id, showToast, handleBotCommand, attachments, handleAtBottomChange],
   );
 
   const onKey = useCallback(
@@ -827,21 +877,36 @@ export function ChatView({
                 ? `${m.role}:${m.timestamp}:${m.content_type}`
                 : `${m.role}:${_index}`
             }
-            itemContent={(_index, m) => <MessageBubble m={m} />}
+            itemContent={(index, m) => (
+              <div
+                className={`messages-row${
+                  index === messages.length - 1 && !streaming
+                    ? " messages-row-last"
+                    : ""
+                }`}
+              >
+                <MessageBubble m={m} />
+              </div>
+            )}
             initialTopMostItemIndex={Math.max(0, messages.length - 1)}
-            followOutput={atBottom ? "auto" : false}
-            atBottomStateChange={setAtBottom}
+            atBottomStateChange={handleAtBottomChange}
             atBottomThreshold={64}
-            increaseViewportBy={{ top: 200, bottom: 200 }}
-            // Stable `components` object + live data via `context`. The
-            // Footer reads context and renders the streaming bubble when
-            // present — keeping component identity stable across stream
-            // chunks (otherwise Virtuoso 4.x merges defaults against an
-            // undefined components prop and explodes on EmptyPlaceholder).
+            increaseViewportBy={{ top: 800, bottom: 800 }}
             components={VIRTUOSO_COMPONENTS}
             context={streaming}
             className="messages-virtuoso"
           />
+        )}
+        {!atBottom && messages.length > 0 && (
+          <button
+            type="button"
+            className="scroll-to-latest"
+            onClick={scrollToLatest}
+            aria-label="Scroll to latest message"
+            title="Scroll to latest message"
+          >
+            <ChevronDown size={24} />
+          </button>
         )}
       </div>
 
