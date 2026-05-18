@@ -956,7 +956,8 @@ export function ChatView({
         </div>
       </div>
 
-      <div className="messages" ref={scrollerRef} onScroll={handleScroll}>
+      <div className="messages-wrapper">
+        <div className="messages" ref={scrollerRef} onScroll={handleScroll}>
         {messages.length === 0 && !streaming ? (
           historyLoaded ? (
             <div className="empty-state">
@@ -1014,6 +1015,7 @@ export function ChatView({
             )}
           </div>
         )}
+        </div>
         {!atBottom && messages.length > 0 && (
           <button
             type="button"

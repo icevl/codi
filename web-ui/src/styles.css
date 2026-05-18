@@ -587,6 +587,15 @@ button.burger {
   padding: 5px 10px;
 }
 
+.messages-wrapper {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
 .messages {
   /* overflow-anchor: none — we own scrollTop manually, no browser auto-anchor. */
   flex: 1;
@@ -594,7 +603,6 @@ button.burger {
   overflow-y: auto;
   overflow-x: hidden;
   overflow-anchor: none;
-  position: relative;
 }
 
 .messages-list {
