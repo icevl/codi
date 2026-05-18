@@ -588,14 +588,47 @@ button.burger {
 }
 
 .messages {
-  /* No padding / scrollbar — Virtuoso owns the scrollable area;
-     position: relative anchors the floating "scroll to latest" pill. */
+  /* overflow-anchor: none — we own scrollTop manually, no browser auto-anchor. */
   flex: 1;
   min-width: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overflow-anchor: none;
+  position: relative;
+}
+
+.messages-list {
   display: flex;
   flex-direction: column;
-  overflow: hidden;
-  position: relative;
+}
+
+.messages-top-sentinel {
+  /* IntersectionObserver target for infinite scroll up. */
+  height: 1px;
+}
+
+.messages-loading-older {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 12px;
+  font-size: 13px;
+  color: var(--text-2);
+}
+
+.load-older-button {
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  color: var(--text-0);
+  padding: 6px 14px;
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.load-older-button:hover {
+  background: var(--bg-2);
 }
 
 .scroll-to-latest {
@@ -626,23 +659,16 @@ button.burger {
   transform: translateY(0);
 }
 
-.messages-virtuoso {
-  flex: 1;
-  min-height: 0;
-  width: 100%;
-}
-
 .messages-row {
   padding: 0 18px;
+  /* Isolation hint — siblings don't invalidate each other on layout/paint. */
+  contain: layout paint;
 }
 
 .messages-row .bubble {
   margin-bottom: 8px;
 }
 
-/* Class-based first/last padding so it's measured by Virtuoso. A
-   `:first-child` selector would shift as the DOM-first row changes
-   during virtualization. */
 .messages-row-first {
   padding-top: 12px;
 }
@@ -652,11 +678,13 @@ button.burger {
 }
 
 .empty-state {
+  /* Centred inside the scrolling .messages, which isn't a flex parent. */
+  position: absolute;
+  inset: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  flex: 1;
   color: var(--text-2);
   gap: 8px;
 }
@@ -2152,7 +2180,14 @@ button.burger {
   }
 
   .messages {
-    padding: 12px 12px 8px;
+    padding: 12px 0 8px;
+  }
+
+  /* 12px gutter matches .chat-header on mobile — keeps content
+     visually aligned with the bar above without reserving the
+     desktop-sized avatar/tail space. */
+  .messages-row {
+    padding: 0 12px;
   }
 
   .bubble {
@@ -2160,7 +2195,27 @@ button.burger {
     font-size: 13px;
   }
 
+  /* Mobile: avatar + bubble tails removed for compactness. Restore the
+     full corner radius since there's no tail pointing at the corner. */
+  .message-avatar {
+    display: none;
+  }
+
+  .message-line.assistant > .bubble,
+  .message-line.user > .bubble {
+    border-radius: 14px;
+  }
+
+  .message-line.assistant > .bubble::before,
+  .message-line.assistant > .bubble::after,
+  .message-line.user > .bubble::before,
+  .message-line.user > .bubble::after {
+    content: none;
+  }
+
+  /* Same 12px gutter as .chat-header and .messages-row above. */
   .composer {
+    margin: 0 12px 12px;
     padding: 10px 12px 12px;
   }
 

@@ -9,7 +9,7 @@ Endpoints (all under `/api` unless stated):
   POST /api/sessions                 create new window (cwd, runtime[, resume])
   DELETE /api/sessions/{wid}         kill window
   PATCH  /api/sessions/{wid}         rename window
-  GET  /api/sessions/{wid}/messages?since_byte=N → recent messages
+  GET  /api/sessions/{wid}/messages?limit=N&before=ISO → paginated history
   GET  /api/sessions/{wid}/git       {is_repo, branch} for the pane's cwd
   GET  /api/sessions/{wid}/branches  {is_repo, current, branches[]} — local heads
   POST /api/sessions/{wid}/switch-branch {branch} — runs `git switch`
@@ -620,23 +620,26 @@ def create_app(
     @app.get("/api/sessions/{window_id}/messages")
     async def get_messages(
         window_id: str,
-        since_byte: int = Query(0, ge=0),
+        limit: int = Query(500, ge=1, le=2000),
+        before: str | None = Query(None),
         _user: str = Depends(require_auth),
     ) -> dict[str, Any]:
-        messages, _count = await session_manager.get_recent_messages(
-            window_id, start_byte=since_byte
-        )
+        all_messages, _count = await session_manager.get_recent_messages(window_id)
         session = await session_manager.resolve_session_for_window(window_id)
-        next_byte = since_byte
-        if session and session.file_path:
-            try:
-                next_byte = Path(session.file_path).stat().st_size
-            except OSError:
-                pass
+
+        # ISO timestamps compare lexicographically.
+        if before is not None:
+            all_messages = [
+                m for m in all_messages if (m.get("timestamp") or "") < before
+            ]
+
+        has_more = len(all_messages) > limit
+        messages = all_messages[-limit:]
+
         return {
             "messages": messages,
-            "next_byte": next_byte,
             "session_id": session.session_id if session else None,
+            "has_more": has_more,
         }
 
     async def _resolve_window_cwd(window_id: str) -> str:

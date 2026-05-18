@@ -5,10 +5,10 @@ import {
   memo,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
 } from "react";
-import { Virtuoso, VirtuosoHandle } from "react-virtuoso";
 import {
   Bot,
   Camera,
@@ -62,7 +62,14 @@ function parseSlashCommand(text: string): string | null {
   return trimmed.split(/\s+/)[0].toLowerCase();
 }
 
-type ChatMessage = SessionMessage & { pending?: boolean };
+// Client-side _clientId keeps memo + anchor lookup stable across prepends.
+type ChatMessage = SessionMessage & { pending?: boolean; _clientId: string };
+
+let _clientIdCounter = 0;
+function attachKey(m: SessionMessage & { pending?: boolean }): ChatMessage {
+  return { ...m, _clientId: `m${++_clientIdCounter}` };
+}
+
 
 // Compact time label for a message bubble. Same day → HH:MM; same year
 // but a different day → MMM dd HH:MM; otherwise drops the year in too.
@@ -139,28 +146,17 @@ const StreamingBubble = memo(function StreamingBubble({
   status: string;
 }) {
   return (
-    <div className="messages-row">
-      <div className="message-line assistant">
-        <div className="message-avatar" aria-hidden="true">
-          <Bot size={16} />
-        </div>
-        <div className="bubble assistant streaming">
-          <div className="meta">assistant · {status}</div>
-          <pre className="stream-body">{text || "…"}</pre>
-        </div>
+    <div className="message-line assistant">
+      <div className="message-avatar" aria-hidden="true">
+        <Bot size={16} />
+      </div>
+      <div className="bubble assistant streaming">
+        <div className="meta">assistant · {status}</div>
+        <pre className="stream-body">{text || "…"}</pre>
       </div>
     </div>
   );
 });
-
-// Module-scope so Virtuoso 4.x sees a stable `components` identity —
-// inline functions trigger an EmptyPlaceholder crash on next render.
-type StreamCtx = { text: string; status: string } | null;
-function VirtuosoStreamingFooter({ context }: { context?: StreamCtx }) {
-  if (!context) return null;
-  return <StreamingBubble text={context.text} status={context.status} />;
-}
-const VIRTUOSO_COMPONENTS = { Footer: VirtuosoStreamingFooter };
 
 const KEY_BUTTONS: Array<{ label: string; key: string }> = [
   { label: "Esc", key: "Escape" },
@@ -219,28 +215,49 @@ export function ChatView({
   const [branchList, setBranchList] = useState<string[] | null>(null);
   const [branchLoadError, setBranchLoadError] = useState<string | null>(null);
   const [switchingBranch, setSwitchingBranch] = useState<string | null>(null);
-  const virtuosoRef = useRef<VirtuosoHandle | null>(null);
-  const atBottomRef = useRef(true);
+  const scrollerRef = useRef<HTMLDivElement | null>(null);
+  const messagesListRef = useRef<HTMLDivElement | null>(null);
+  const topSentinelRef = useRef<HTMLDivElement | null>(null);
   const [atBottom, setAtBottom] = useState(true);
-  const handleAtBottomChange = useCallback((next: boolean) => {
-    atBottomRef.current = next;
-    setAtBottom(next);
+  // Sync mirror of `atBottom` — useState lags one tick for layout-effect reads.
+  const stickToBottomRef = useRef(true);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  // Captured by loadOlder before prepend, consumed by the layout effect to
+  // restore the same on-screen bubble position.
+  const pendingAnchorRef = useRef<{ clientId: string; top: number } | null>(
+    null,
+  );
+
+  const scrollToBottom = useCallback(() => {
+    const el = scrollerRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
   }, []);
-  // One-shot override that overrides `atBottomRef` for the next scroll
-  // effect — Virtuoso can flip at-bottom to false mid-append before we
-  // scroll past the new item.
-  const forceStickRef = useRef(false);
 
   const scrollToLatest = useCallback(() => {
-    forceStickRef.current = true;
-    handleAtBottomChange(true);
-    requestAnimationFrame(() => {
-      virtuosoRef.current?.scrollTo({
-        top: Number.MAX_SAFE_INTEGER,
-        behavior: "smooth",
-      });
-    });
-  }, [handleAtBottomChange]);
+    const el = scrollerRef.current;
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+  }, []);
+
+  // First bubble whose top is at-or-below the scroller's top edge.
+  const captureAnchor = useCallback(() => {
+    const el = scrollerRef.current;
+    if (!el) return;
+    const rootTop = el.getBoundingClientRect().top;
+    const rows = el.querySelectorAll<HTMLElement>("[data-msg-key]");
+    for (const row of Array.from(rows)) {
+      const rect = row.getBoundingClientRect();
+      if (rect.top >= rootTop) {
+        pendingAnchorRef.current = {
+          clientId: row.dataset.msgKey!,
+          top: rect.top,
+        };
+        return;
+      }
+    }
+  }, []);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const keysMenuRef = useRef<HTMLDivElement | null>(null);
@@ -258,7 +275,8 @@ export function ChatView({
 
   useEffect(() => {
     const previousWid = windowIdRef.current;
-    if (previousWid && previousWid !== session.window_id) {
+    const isRealSwitch = previousWid && previousWid !== session.window_id;
+    if (isRealSwitch) {
       draftsRef.current[previousWid] = textRef.current;
     }
     windowIdRef.current = session.window_id;
@@ -295,6 +313,7 @@ export function ChatView({
     };
   }, []);
 
+
   const addFiles = useCallback((files: FileList | File[] | null) => {
     if (!files) return;
     const incoming = Array.from(files).filter((f) => f.type.startsWith("image/"));
@@ -323,12 +342,14 @@ export function ChatView({
   const loadHistory = useCallback(() => {
     let cancelled = false;
     setMessages([]);
+    setHasMore(false);
     setHistoryLoaded(false);
     api
       .getMessages(session.window_id)
       .then((r) => {
         if (cancelled) return;
-        setMessages(r.messages);
+        setMessages(r.messages.map(attachKey));
+        setHasMore(r.has_more);
         sessionIdRef.current = r.session_id;
       })
       .catch((err: Error) => {
@@ -346,6 +367,103 @@ export function ChatView({
 
   // Load history when session changes.
   useEffect(() => loadHistory(), [loadHistory]);
+
+  // Ref-shape keeps the IO observer stable; new messages don't churn it.
+  const loadingOlderRef = useRef(false);
+  const loadOlderRef = useRef<() => void>(() => {});
+  useEffect(() => {
+    loadOlderRef.current = () => {
+      if (loadingOlderRef.current || !hasMore) return;
+      const oldest = messages.find((m) => !!m.timestamp);
+      if (!oldest?.timestamp) return;
+      captureAnchor();
+      loadingOlderRef.current = true;
+      setLoadingOlder(true);
+      api
+        .getMessages(session.window_id, { before: oldest.timestamp })
+        .then((r) => {
+          setMessages((prev) => [...r.messages.map(attachKey), ...prev]);
+          setHasMore(r.has_more);
+        })
+        .catch((err: Error) => {
+          pendingAnchorRef.current = null;
+          showToast(err.message, "error");
+        })
+        .finally(() => {
+          loadingOlderRef.current = false;
+          setLoadingOlder(false);
+        });
+    };
+  });
+  const loadOlder = useCallback(() => loadOlderRef.current(), []);
+
+  // Single scrollTop writer: restore anchor on prepend, snap on stick.
+  useLayoutEffect(() => {
+    const el = scrollerRef.current;
+    if (!el) return;
+    const anchor = pendingAnchorRef.current;
+    if (anchor) {
+      const row = el.querySelector<HTMLElement>(
+        `[data-msg-key="${anchor.clientId}"]`,
+      );
+      if (row) {
+        const newTop = row.getBoundingClientRect().top;
+        const delta = newTop - anchor.top;
+        if (delta !== 0) el.scrollTop += delta;
+      }
+      pendingAnchorRef.current = null;
+      return;
+    }
+    if (stickToBottomRef.current) {
+      el.scrollTop = el.scrollHeight;
+    }
+  });
+
+  // Scroll event is the single source of "am I at the bottom?".
+  const handleScroll = useCallback(() => {
+    const el = scrollerRef.current;
+    if (!el) return;
+    const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
+    const next = dist < 4;
+    stickToBottomRef.current = next;
+    setAtBottom((prev) => (prev !== next ? next : prev));
+  }, []);
+
+  // New session always lands at the bottom regardless of prior scroll.
+  useEffect(() => {
+    stickToBottomRef.current = true;
+    setAtBottom(true);
+  }, [session.window_id]);
+
+  // Re-pin to bottom on deferred layout (images, fonts, keyboard close).
+  // Anchoring above-viewport rows is intentionally absent — any
+  // scrollTop write during iOS momentum scroll cancels the momentum.
+  useEffect(() => {
+    const list = messagesListRef.current;
+    const el = scrollerRef.current;
+    if (!list || !el) return;
+    const ro = new ResizeObserver(() => {
+      if (stickToBottomRef.current) el.scrollTop = el.scrollHeight;
+    });
+    ro.observe(list);
+    return () => ro.disconnect();
+  }, [messages.length > 0]);
+
+  // Top sentinel fires loadOlder as it slides into the overscan band.
+  useEffect(() => {
+    if (!hasMore) return;
+    const sentinel = topSentinelRef.current;
+    const root = scrollerRef.current;
+    if (!sentinel || !root) return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) loadOlder();
+      },
+      { root, rootMargin: "300px 0px 0px 0px" },
+    );
+    io.observe(sentinel);
+    return () => io.disconnect();
+  }, [hasMore, loadOlder]);
 
   // Subscribe to live updates.
   useEffect(() => {
@@ -378,7 +496,7 @@ export function ChatView({
       setStreaming(null);
 
       setMessages((prev) => {
-        // Reconcile optimistic user echo: replace the matching pending bubble.
+        // Replace optimistic echo in place; keep _clientId so DOM node is reused.
         if (event.role === "user") {
           const idx = prev.findIndex(
             (m) => m.pending && m.role === "user" && m.text === event.text,
@@ -389,17 +507,18 @@ export function ChatView({
               role: event.role,
               text: event.text,
               content_type: event.content_type,
+              _clientId: prev[idx]._clientId,
             };
             return next;
           }
         }
         return [
           ...prev,
-          {
+          attachKey({
             role: event.role,
             text: event.text,
             content_type: event.content_type,
-          },
+          }),
         ];
       });
     });
@@ -435,50 +554,6 @@ export function ChatView({
     };
   }, [session.window_id]);
 
-  // Sole authority on stick-to-bottom. Double-RAF lets Virtuoso measure
-  // the new item before we scroll past it; the post-scroll override of
-  // atBottom defeats any late `atBottomStateChange(false)` driven by
-  // the pre-scroll layout.
-  useEffect(() => {
-    const force = forceStickRef.current;
-    if (!atBottomRef.current && !force) return;
-    if (messages.length === 0 && !streaming?.text) return;
-    forceStickRef.current = false;
-    let inner = 0;
-    const outer = requestAnimationFrame(() => {
-      inner = requestAnimationFrame(() => {
-        virtuosoRef.current?.scrollTo({
-          top: Number.MAX_SAFE_INTEGER,
-          behavior: "auto",
-        });
-        atBottomRef.current = true;
-        setAtBottom(true);
-      });
-    });
-    return () => {
-      cancelAnimationFrame(outer);
-      if (inner) cancelAnimationFrame(inner);
-    };
-  }, [messages.length, streaming?.text]);
-
-  // Virtuoso instance is reused across sessions, so on session change
-  // we have to scroll the new history's bottom into view ourselves.
-  const scrolledForSessionRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (!historyLoaded) return;
-    if (scrolledForSessionRef.current === session.window_id) return;
-    scrolledForSessionRef.current = session.window_id;
-    forceStickRef.current = true;
-    const id = requestAnimationFrame(() => {
-      virtuosoRef.current?.scrollTo({
-        top: Number.MAX_SAFE_INTEGER,
-        behavior: "auto",
-      });
-      handleAtBottomChange(true);
-      forceStickRef.current = false;
-    });
-    return () => cancelAnimationFrame(id);
-  }, [historyLoaded, session.window_id, handleAtBottomChange]);
 
   // Close the keys/commands popover on outside click or Escape.
   useEffect(() => {
@@ -654,11 +729,16 @@ export function ChatView({
         : caption;
       setMessages((prev) => [
         ...prev,
-        { role: "user", text: optimisticText, content_type: "text", pending: true },
+        attachKey({
+          role: "user",
+          text: optimisticText,
+          content_type: "text",
+          pending: true,
+        }),
       ]);
-      // Snap to own send regardless of read position (messenger UX).
-      forceStickRef.current = true;
-      handleAtBottomChange(true);
+      // Snap to own send regardless of read position.
+      stickToBottomRef.current = true;
+      setAtBottom(true);
 
       // Clear composer immediately so sending feels instant. Restored on error.
       setText("");
@@ -708,7 +788,13 @@ export function ChatView({
         textareaRef.current?.focus();
       }
     },
-    [session.window_id, showToast, handleBotCommand, attachments, handleAtBottomChange],
+    [
+      session.window_id,
+      showToast,
+      handleBotCommand,
+      attachments,
+      scrollToBottom,
+    ],
   );
 
   const onKey = useCallback(
@@ -870,7 +956,7 @@ export function ChatView({
         </div>
       </div>
 
-      <div className="messages">
+      <div className="messages" ref={scrollerRef} onScroll={handleScroll}>
         {messages.length === 0 && !streaming ? (
           historyLoaded ? (
             <div className="empty-state">
@@ -884,37 +970,49 @@ export function ChatView({
             </div>
           )
         ) : (
-          <Virtuoso
-            ref={virtuosoRef}
-            data={messages}
-            // Default index keys: role+ts+ct collided when the bot emitted
-            // two messages in the same millisecond, thrashing mount/unmount.
-            itemContent={(index, m) => {
-              const isFirst = index === 0;
+          <div className="messages-list" ref={messagesListRef}>
+            <div ref={topSentinelRef} className="messages-top-sentinel" />
+            {hasMore && (
+              <div className="messages-loading-older">
+                {loadingOlder ? (
+                  <>
+                    <div className="empty-state-spinner small" />
+                    <span>Loading earlier messages…</span>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    className="load-older-button"
+                    onClick={loadOlder}
+                  >
+                    Load earlier messages
+                  </button>
+                )}
+              </div>
+            )}
+            {messages.map((m, index) => {
+              const isFirst = !hasMore && index === 0;
               const isLast = index === messages.length - 1 && !streaming;
               const cls =
                 "messages-row" +
                 (isFirst ? " messages-row-first" : "") +
                 (isLast ? " messages-row-last" : "");
               return (
-                <div className={cls}>
+                <div
+                  key={m._clientId}
+                  data-msg-key={m._clientId}
+                  className={cls}
+                >
                   <MessageBubble m={m} />
                 </div>
               );
-            }}
-            initialTopMostItemIndex={Math.max(0, messages.length - 1)}
-            atBottomStateChange={handleAtBottomChange}
-            atBottomThreshold={64}
-            // Bubble heights vary wildly; pixel overscan alone is eaten by
-            // one tall message. Item-count overscan + a reasonable default
-            // height keep first-measurement scroll corrections small.
-            defaultItemHeight={140}
-            minOverscanItemCount={{ top: 12, bottom: 12 }}
-            increaseViewportBy={{ top: 800, bottom: 800 }}
-            components={VIRTUOSO_COMPONENTS}
-            context={streaming}
-            className="messages-virtuoso"
-          />
+            })}
+            {streaming && (
+              <div className="messages-row messages-row-last">
+                <StreamingBubble text={streaming.text} status={streaming.status} />
+              </div>
+            )}
+          </div>
         )}
         {!atBottom && messages.length > 0 && (
           <button
