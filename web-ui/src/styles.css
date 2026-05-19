@@ -898,6 +898,15 @@ button.burger {
   justify-content: space-between;
 }
 
+.bubble .meta > span {
+  /* Long role+content_type combos like "ASSISTANT · TOOL_RESULT" must
+     not push the time off the bubble on narrow screens. */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .bubble-time {
   font-family: var(--font-mono);
   font-size: 10px;

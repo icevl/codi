@@ -34,6 +34,33 @@ export class EventStream {
       // scheduler (no-op if `close` already armed it).
       this.scheduleReconnect();
     };
+    this.armVisibilityRefresh();
+  }
+
+  // iOS Safari (and to a lesser extent other mobile browsers) suspends
+  // background tabs without firing `close` on their WebSockets. When the
+  // page comes back, the socket looks `OPEN` but is dead — no events
+  // arrive. On every transition to visible, kick the socket so we either
+  // confirm it's healthy on the next message or rebuild it.
+  private visibilityArmed = false;
+  private armVisibilityRefresh() {
+    if (this.visibilityArmed) return;
+    this.visibilityArmed = true;
+    const refresh = () => {
+      if (this.closed) return;
+      if (document.visibilityState !== "visible") return;
+      const sock = this.socket;
+      if (!sock) {
+        this.scheduleReconnect();
+        return;
+      }
+      if (sock.readyState !== WebSocket.OPEN) return;
+      // Force a clean reconnect. onclose handler will reschedule.
+      sock.close();
+    };
+    document.addEventListener("visibilitychange", refresh);
+    window.addEventListener("pageshow", refresh);
+    window.addEventListener("focus", refresh);
   }
 
   private scheduleReconnect() {
