@@ -125,6 +125,12 @@ class SessionManager:
         default_factory=dict, init=False, repr=False
     )
     _session_index_loaded_at: float = field(default=0.0, init=False, repr=False)
+    # transcript_path -> (mtime, (session_id, cwd)). Old session files don't
+    # change, so re-parsing their session_meta header every 2s is wasted work
+    # — only ~172 stat() calls per scan after the cache is warm.
+    _session_meta_cache: dict[Path, tuple[float, tuple[str, str]]] = field(
+        default_factory=dict, init=False, repr=False
+    )
     _force_status_probe_windows: set[str] = field(
         default_factory=set, init=False, repr=False
     )
@@ -622,23 +628,33 @@ class SessionManager:
         mtime_index: dict[str, float] = {}
 
         if base.exists():
+            seen_paths: set[Path] = set()
             for file_path in base.rglob("*.jsonl"):
                 if file_path.name.endswith(".jsonl.bak"):
                     continue
-                sid, cwd = self._read_session_meta(file_path)
-                if not sid:
-                    continue
-
                 try:
                     mtime = file_path.stat().st_mtime
                 except OSError:
-                    mtime = 0.0
-
+                    continue
+                seen_paths.add(file_path)
+                cached = self._session_meta_cache.get(file_path)
+                if cached and cached[0] == mtime:
+                    sid, cwd = cached[1]
+                else:
+                    sid, cwd = self._read_session_meta(file_path)
+                    self._session_meta_cache[file_path] = (mtime, (sid, cwd))
+                if not sid:
+                    continue
                 prev = mtime_index.get(sid)
                 if prev is None or mtime >= prev:
                     index[sid] = file_path
                     mtime_index[sid] = mtime
                     cwd_index[sid] = cwd
+            # Evict cache entries for files that no longer exist.
+            if len(self._session_meta_cache) > len(seen_paths):
+                for stale in list(self._session_meta_cache.keys()):
+                    if stale not in seen_paths:
+                        del self._session_meta_cache[stale]
 
         # Claude Code: add bound windows whose runtime is "claude".
         for ws in self.window_states.values():

@@ -97,7 +97,28 @@ async def stream_pane_loop(
     active: set[str] = set()
 
     logger.info("Pane streaming started (interval: %ss)", interval)
+    # Skip the whole tmux-poll cycle when no web client is listening.
+    # Otherwise we fork tmux ~20 times per second for nobody.
+    idle_interval = max(interval, 2.0)
     while True:
+        if bus.subscriber_count == 0:
+            if active:
+                for wid in list(active):
+                    ws = session_manager.window_states.get(wid)
+                    if ws is None:
+                        active.discard(wid)
+                        continue
+                    await bus.publish(
+                        {
+                            "type": "stream_end",
+                            "window_id": wid,
+                            "session_id": ws.session_id,
+                        }
+                    )
+                active.clear()
+                last_body.clear()
+            await asyncio.sleep(idle_interval)
+            continue
         try:
             for window_id, ws in list(session_manager.window_states.items()):
                 try:
