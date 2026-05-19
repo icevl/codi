@@ -24,6 +24,7 @@ from ..session_monitor import NewMessage, SessionMonitor
 from .api import create_app
 from .events import EventBus, session_monitor_listener
 from .streaming import stream_pane_loop
+from .update_checker import poll_loop as update_poll_loop
 
 if TYPE_CHECKING:
     from telegram import Bot
@@ -41,11 +42,13 @@ class WebServerHandle:
         task: asyncio.Task[None],
         bus: EventBus,
         stream_task: asyncio.Task[None] | None = None,
+        update_task: asyncio.Task[None] | None = None,
     ) -> None:
         self.server = server
         self.task = task
         self.bus = bus
         self.stream_task = stream_task
+        self.update_task = update_task
         self.listener: Listener | None = None
 
 
@@ -124,12 +127,25 @@ async def start_web_server(
     stream_task = asyncio.create_task(
         stream_pane_loop(bus), name="codexbot-web-pane-stream"
     )
+    update_task: asyncio.Task[None] | None = None
+    if config.auto_update_enabled:
+        update_task = asyncio.create_task(
+            update_poll_loop(bus), name="codexbot-web-update-checker"
+        )
+    else:
+        logger.info("Auto-update checker disabled via CODEXBOT_AUTO_UPDATE")
 
     logger.info(
         "Web UI listening on http://%s:%d", config.web_ui_host, config.web_ui_port
     )
 
-    handle = WebServerHandle(server=server, task=task, bus=bus, stream_task=stream_task)
+    handle = WebServerHandle(
+        server=server,
+        task=task,
+        bus=bus,
+        stream_task=stream_task,
+        update_task=update_task,
+    )
     handle.listener = listener_ref
     _handle = handle
     return handle
@@ -148,6 +164,12 @@ async def stop_web_server(monitor: SessionMonitor | None = None) -> None:
         handle.stream_task.cancel()
         try:
             await handle.stream_task
+        except (asyncio.CancelledError, Exception):  # noqa: BLE001
+            pass
+    if handle.update_task is not None:
+        handle.update_task.cancel()
+        try:
+            await handle.update_task
         except (asyncio.CancelledError, Exception):  # noqa: BLE001
             pass
     handle.server.should_exit = True

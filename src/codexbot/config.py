@@ -118,6 +118,13 @@ class Config:
         # session operations through a browser UI.
         self.web_ui_password: str = os.getenv("WEB_UI_PASSWORD", "").strip()
         self.web_ui_enabled: bool = bool(self.web_ui_password)
+        # Auto-update checker (polls GitHub main every 10 min and shows a
+        # banner in the web UI when there's a new commit). Defaults on;
+        # set CODEXBOT_AUTO_UPDATE=false to disable the poll loop and
+        # suppress the banner entirely.
+        self.auto_update_enabled: bool = os.getenv(
+            "CODEXBOT_AUTO_UPDATE", "true"
+        ).strip().lower() not in ("false", "0", "no", "off")
         self.web_ui_host: str = (
             os.getenv("WEB_UI_HOST", "127.0.0.1").strip() or "127.0.0.1"
         )

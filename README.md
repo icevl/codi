@@ -46,8 +46,13 @@ Codi was developed on itself — iterating from a phone over Telegram while the 
 - Drag-and-drop / paste image attachments
 - Inline git branch indicator with a one-click branch switcher (`git switch`) for the pane's cwd
 - Skill catalog with quick-arm buttons
+- **Side panels** — three optional auxiliary columns next to the chat, opened via the `⋮` menu in the session header. Each is per-topic: which panels are open and their column widths are remembered separately for every session, persisted to `localStorage`, and survive reloads. Widths are adjustable by dragging the splitter between columns; mobile (≤760px) falls back to a fixed-overlay slide-in:
+  - **Diff** — live `git diff` view (uncommitted + untracked) for the session's cwd, with file/hunk styling and add/del stats in the header. Refreshes on chat activity (no polling) so edits made by the agent show up immediately
+  - **Office** — sprite-based "agent at a desk" visualization keyed to the session's runtime state, plus a tile layout editor for customizing the scene
+  - **Terminal** — full xterm.js terminal driven over WebSocket against a PTY on the host. Two modes via a header toggle: `Attach` (joins the topic's tmux window inside a per-client grouped session — see what the agent sees, type alongside it) and `Shell` (fresh `$SHELL -i` in the session cwd, isolated from the agent). Supports `mc`, `vim`, `htop`, mouse, true-color, resize; auto-reconnects with exponential backoff if the WS drops
 - Password login + optional TOTP 2FA (QR enrolment on first start)
-- Dark theme tuned to GitHub Primer colors
+- Self-update: polls GitHub `main` and offers a one-click `git pull --ff-only` + service reload when there's a new commit (toggleable via `CODEXBOT_AUTO_UPDATE`)
+- Dark theme
 
 ### Telegram bot
 
@@ -189,6 +194,7 @@ Open the web UI at `http://127.0.0.1:8787` and/or message your Telegram bot.
 | `WEB_UI_TOTP_ACCOUNT`     | hostname           | Account label shown in the authenticator app                             |
 | `WEB_UI_COOKIE_SECURE`    | `auto`             | `auto` (follow scheme), `true`, or `false`                               |
 | `WEB_UI_ALLOWED_ORIGINS`  | loopback variants  | Comma-separated WebSocket origin allowlist (full origin with scheme)     |
+| `CODEXBOT_AUTO_UPDATE`    | `true`             | Poll GitHub `main` every 10 min; show an in-UI banner offering `git pull --ff-only` + service reload when a new commit lands. Skipped silently when the working tree is dirty. Set to `false` to disable the check and hide the banner |
 
 ### Runtimes & sessions
 
