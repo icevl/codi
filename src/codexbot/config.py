@@ -298,6 +298,9 @@ class Config:
         self.queue_drain_timeout_seconds = max(
             0.1, float(os.getenv("CODEXBOT_QUEUE_DRAIN_TIMEOUT_SECONDS", "5.0"))
         )
+        self.history_cache_max_sessions = max(
+            1, int(os.getenv("CODEXBOT_HISTORY_CACHE_MAX_SESSIONS", "8"))
+        )
         self.session_detect_timeout = float(
             os.getenv("CODEXBOT_SESSION_DETECT_TIMEOUT", "12.0")
         )

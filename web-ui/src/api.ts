@@ -22,6 +22,15 @@ export interface SessionMessage {
   timestamp?: string;
 }
 
+export interface SessionMessagesResponse {
+  messages: SessionMessage[];
+  session_id: string | null;
+  has_more: boolean;
+  oldest_timestamp?: string | null;
+  newest_timestamp?: string | null;
+  history_version?: string;
+}
+
 export interface RuntimeInfo {
   name: string;
   display_name: string;
@@ -132,11 +141,7 @@ export const api = {
     params.set("limit", String(opts?.limit ?? 500));
     if (opts?.before) params.set("before", opts.before);
     if (opts?.after) params.set("after", opts.after);
-    return request<{
-      messages: SessionMessage[];
-      session_id: string | null;
-      has_more: boolean;
-    }>(
+    return request<SessionMessagesResponse>(
       `/api/sessions/${encodeURIComponent(windowId)}/messages?${params.toString()}`,
     );
   },

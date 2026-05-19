@@ -10,12 +10,14 @@ from __future__ import annotations
 
 import json
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pyotp
 import pytest
 from fastapi.testclient import TestClient
 
 from codexbot import config as config_module
+from codexbot.session import CodexSession, HistorySnapshot
 from codexbot.tmux_manager import TmuxWindow
 from codexbot.web.api import create_app
 from codexbot.web.events import EventBus
@@ -126,6 +128,50 @@ def test_list_sessions_returns_windows(
     assert len(body["sessions"]) == 1
     assert body["sessions"][0]["window_id"] == "@5"
     assert body["sessions"][0]["runtime"] in {"codex", "claude"}
+
+
+def test_get_messages_returns_history_metadata(
+    authed_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from codexbot.web import api as web_api
+
+    snapshot = HistorySnapshot(
+        messages=[
+            {
+                "role": "assistant",
+                "text": "hello",
+                "content_type": "text",
+                "timestamp": "2026-05-19T10:00:00Z",
+            }
+        ],
+        total_count=1,
+        oldest_timestamp="2026-05-19T10:00:00Z",
+        newest_timestamp="2026-05-19T10:00:00Z",
+        history_version="123:456:1",
+    )
+    session = CodexSession("session-1", "hello", 1, "/tmp/session.jsonl")
+    monkeypatch.setattr(
+        web_api.session_manager,
+        "get_history_snapshot",
+        AsyncMock(return_value=snapshot),
+    )
+    monkeypatch.setattr(
+        web_api.session_manager,
+        "resolve_session_for_window",
+        AsyncMock(return_value=session),
+    )
+
+    r = authed_client.get("/api/sessions/@5/messages")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body == {
+        "messages": snapshot.messages,
+        "session_id": "session-1",
+        "has_more": False,
+        "oldest_timestamp": "2026-05-19T10:00:00Z",
+        "newest_timestamp": "2026-05-19T10:00:00Z",
+        "history_version": "123:456:1",
+    }
 
 
 def test_send_text_invokes_session_manager(

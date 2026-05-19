@@ -1,5 +1,6 @@
 """Tests for SessionManager pure dict operations."""
 
+import json
 import time
 from unittest.mock import AsyncMock
 from unittest.mock import MagicMock
@@ -7,7 +8,8 @@ from unittest.mock import patch
 
 import pytest
 
-from codexbot.session import CodexSession, SessionManager
+from codexbot.session import CodexSession, HistorySnapshot, SessionManager
+from codexbot.transcript_parser import TranscriptParser
 
 
 @pytest.fixture
@@ -15,6 +17,23 @@ def mgr(monkeypatch) -> SessionManager:
     monkeypatch.setattr(SessionManager, "_load_state", lambda self: None)
     monkeypatch.setattr(SessionManager, "_save_state", lambda self: None)
     return SessionManager()
+
+
+def _message_entry(role: str, text: str, timestamp: str) -> dict:
+    return {
+        "type": role,
+        "timestamp": timestamp,
+        "message": {"content": [{"type": "text", "text": text}]},
+        "sessionId": "session-1",
+        "cwd": "/tmp",
+    }
+
+
+def _write_transcript(path, *entries: dict) -> None:
+    path.write_text(
+        "".join(json.dumps(entry, ensure_ascii=False) + "\n" for entry in entries),
+        encoding="utf-8",
+    )
 
 
 class TestThreadBindings:
@@ -188,6 +207,177 @@ class TestIsWindowId:
         assert mgr._is_window_id("@") is False
         assert mgr._is_window_id("") is False
         assert mgr._is_window_id("@abc") is False
+
+
+class TestHistoryCache:
+    @pytest.mark.asyncio
+    async def test_history_snapshot_reuses_parsed_cache(
+        self,
+        mgr: SessionManager,
+        tmp_path,
+    ) -> None:
+        transcript = tmp_path / "session.jsonl"
+        _write_transcript(
+            transcript,
+            _message_entry("user", "hello", "2026-05-19T10:00:00Z"),
+        )
+        session = CodexSession("session-1", "", 1, str(transcript))
+
+        with (
+            patch.object(
+                mgr,
+                "resolve_session_for_window",
+                new=AsyncMock(return_value=session),
+            ),
+            patch(
+                "codexbot.session.TranscriptParser.parse_entries",
+                wraps=TranscriptParser.parse_entries,
+            ) as parse_entries,
+        ):
+            first = await mgr.get_history_snapshot("@1")
+            second = await mgr.get_history_snapshot("@1")
+
+        assert [m["text"] for m in first.messages] == ["hello"]
+        assert [m["text"] for m in second.messages] == ["hello"]
+        assert parse_entries.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_history_snapshot_reads_only_appended_tail(
+        self,
+        mgr: SessionManager,
+        tmp_path,
+    ) -> None:
+        transcript = tmp_path / "session.jsonl"
+        _write_transcript(
+            transcript,
+            _message_entry("user", "one", "2026-05-19T10:00:00Z"),
+        )
+        session = CodexSession("session-1", "", 1, str(transcript))
+
+        with patch.object(
+            mgr,
+            "resolve_session_for_window",
+            new=AsyncMock(return_value=session),
+        ):
+            await mgr.get_history_snapshot("@1")
+            initial_size = transcript.stat().st_size
+            with transcript.open("a", encoding="utf-8") as f:
+                f.write(
+                    json.dumps(
+                        _message_entry("assistant", "two", "2026-05-19T10:00:01Z")
+                    )
+                    + "\n"
+                )
+
+            with patch.object(
+                mgr,
+                "_read_transcript_entries",
+                wraps=mgr._read_transcript_entries,
+            ) as read_entries:
+                snapshot = await mgr.get_history_snapshot("@1")
+
+        assert [m["text"] for m in snapshot.messages] == ["one", "two"]
+        assert read_entries.await_args is not None
+        assert read_entries.await_args.kwargs["start_byte"] == initial_size
+
+    @pytest.mark.asyncio
+    async def test_history_snapshot_rebuilds_after_truncate(
+        self,
+        mgr: SessionManager,
+        tmp_path,
+    ) -> None:
+        transcript = tmp_path / "session.jsonl"
+        _write_transcript(
+            transcript,
+            _message_entry("user", "old one", "2026-05-19T10:00:00Z"),
+            _message_entry("assistant", "old two", "2026-05-19T10:00:01Z"),
+        )
+        session = CodexSession("session-1", "", 2, str(transcript))
+
+        with patch.object(
+            mgr,
+            "resolve_session_for_window",
+            new=AsyncMock(return_value=session),
+        ):
+            await mgr.get_history_snapshot("@1")
+            _write_transcript(
+                transcript,
+                _message_entry("assistant", "new", "2026-05-19T10:00:02Z"),
+            )
+
+            snapshot = await mgr.get_history_snapshot("@1")
+
+        assert [m["text"] for m in snapshot.messages] == ["new"]
+        assert snapshot.total_count == 1
+
+    @pytest.mark.asyncio
+    async def test_history_cache_prunes_lru_entries(
+        self,
+        mgr: SessionManager,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path,
+    ) -> None:
+        from codexbot import session as session_module
+
+        monkeypatch.setattr(
+            session_module.config, "history_cache_max_sessions", 1, raising=False
+        )
+        first_path = tmp_path / "first.jsonl"
+        second_path = tmp_path / "second.jsonl"
+        _write_transcript(
+            first_path,
+            _message_entry("user", "first", "2026-05-19T10:00:00Z"),
+        )
+        _write_transcript(
+            second_path,
+            _message_entry("user", "second", "2026-05-19T10:00:01Z"),
+        )
+        first = CodexSession("session-1", "", 1, str(first_path))
+        second = CodexSession("session-2", "", 1, str(second_path))
+
+        with patch.object(
+            mgr,
+            "resolve_session_for_window",
+            new=AsyncMock(return_value=first),
+        ):
+            await mgr.get_history_snapshot("@1")
+        with patch.object(
+            mgr,
+            "resolve_session_for_window",
+            new=AsyncMock(return_value=second),
+        ):
+            await mgr.get_history_snapshot("@2")
+
+        assert len(mgr._history_cache) == 1
+        assert next(iter(mgr._history_cache)).startswith("session-2:")
+
+    @pytest.mark.asyncio
+    async def test_get_recent_messages_uses_history_snapshot(
+        self,
+        mgr: SessionManager,
+    ) -> None:
+        snapshot = HistorySnapshot(
+            messages=[
+                {
+                    "role": "assistant",
+                    "text": "cached",
+                    "content_type": "text",
+                    "timestamp": "2026-05-19T10:00:00Z",
+                }
+            ],
+            total_count=1,
+            oldest_timestamp="2026-05-19T10:00:00Z",
+            newest_timestamp="2026-05-19T10:00:00Z",
+            history_version="1:2:1",
+        )
+
+        with patch.object(
+            mgr, "get_history_snapshot", new=AsyncMock(return_value=snapshot)
+        ):
+            messages, total = await mgr.get_recent_messages("@1")
+
+        assert messages == snapshot.messages
+        assert total == 1
 
 
 class TestWindowBindingGuards:

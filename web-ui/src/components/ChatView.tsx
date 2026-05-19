@@ -26,7 +26,13 @@ import {
   Users,
   X,
 } from "lucide-react";
-import { api, SessionMessage, SessionSummary, WsEvent } from "../api";
+import {
+  api,
+  SessionMessage,
+  SessionMessagesResponse,
+  SessionSummary,
+  WsEvent,
+} from "../api";
 import { SkillsModal } from "./SkillsModal";
 import { Markdown } from "./Markdown";
 import { RuntimeIcon } from "./Sidebar";
@@ -70,10 +76,72 @@ function parseSlashCommand(text: string): string | null {
 
 // Client-side _clientId keeps memo + anchor lookup stable across prepends.
 type ChatMessage = SessionMessage & { pending?: boolean; _clientId: string };
+type HistoryCacheEntry = {
+  messages: ChatMessage[];
+  hasMore: boolean;
+  sessionId: string | null;
+  oldestTimestamp: string | null;
+  newestTimestamp: string | null;
+  historyVersion: string | null;
+};
+
+const HISTORY_CACHE_MAX_WINDOWS = 8;
+const HISTORY_CACHE_MAX_MESSAGES = 2000;
 
 let _clientIdCounter = 0;
 function attachKey(m: SessionMessage & { pending?: boolean }): ChatMessage {
   return { ...m, _clientId: `m${++_clientIdCounter}` };
+}
+
+function latestTimestamp(messages: SessionMessage[]): string | null {
+  let latest: string | null = null;
+  for (const m of messages) {
+    if (m.timestamp && (!latest || m.timestamp > latest)) latest = m.timestamp;
+  }
+  return latest;
+}
+
+function firstTimestamp(messages: SessionMessage[]): string | null {
+  for (const m of messages) {
+    if (m.timestamp) return m.timestamp;
+  }
+  return null;
+}
+
+function messageContentKey(m: SessionMessage): string {
+  return `${m.role}|${m.content_type}|${m.text}`;
+}
+
+function mergeAppendMessages(
+  current: ChatMessage[],
+  incoming: SessionMessage[],
+): ChatMessage[] {
+  if (incoming.length === 0) return current;
+  const seenExact = new Set<string>();
+  const seenContent = new Set<string>();
+  for (const m of current) {
+    const contentKey = messageContentKey(m);
+    seenContent.add(contentKey);
+    if (m.timestamp) seenExact.add(`${m.timestamp}|${contentKey}`);
+  }
+  const fresh = incoming
+    .filter((m) => {
+      const contentKey = messageContentKey(m);
+      if (m.timestamp && seenExact.has(`${m.timestamp}|${contentKey}`)) {
+        return false;
+      }
+      if (!m.timestamp && seenContent.has(contentKey)) return false;
+      return true;
+    })
+    .map(attachKey);
+  return fresh.length > 0 ? [...current, ...fresh] : current;
+}
+
+function responseNewestTimestamp(
+  response: SessionMessagesResponse,
+  messages: SessionMessage[] = response.messages,
+): string | null {
+  return response.newest_timestamp ?? latestTimestamp(messages);
 }
 
 
@@ -233,18 +301,13 @@ export function ChatView({
   // Sync mirror of `atBottom` — useState lags one tick for layout-effect reads.
   const stickToBottomRef = useRef(true);
   const [hasMore, setHasMore] = useState(false);
+  const hasMoreRef = useRef(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
   // Captured by loadOlder before prepend, consumed by the layout effect to
   // restore the same on-screen bubble position.
   const pendingAnchorRef = useRef<{ clientId: string; top: number } | null>(
     null,
   );
-
-  const scrollToBottom = useCallback(() => {
-    const el = scrollerRef.current;
-    if (!el) return;
-    el.scrollTop = el.scrollHeight;
-  }, []);
 
   const scrollToLatest = useCallback(() => {
     const el = scrollerRef.current;
@@ -276,6 +339,7 @@ export function ChatView({
   const branchMenuRef = useRef<HTMLDivElement | null>(null);
   const sessionIdRef = useRef<string | null>(session.session_id);
   const windowIdRef = useRef(session.window_id);
+  const historyCacheRef = useRef<Map<string, HistoryCacheEntry>>(new Map());
   // Per-session draft cache. Switching sessions stashes the current
   // composer text under the previous window_id and restores any draft for
   // the new one, so each topic keeps its own pending message.
@@ -284,6 +348,44 @@ export function ChatView({
   useEffect(() => {
     textRef.current = text;
   }, [text]);
+  useEffect(() => {
+    hasMoreRef.current = hasMore;
+  }, [hasMore]);
+
+  const storeHistoryCache = useCallback(
+    (
+      windowId: string,
+      entry: {
+        messages: ChatMessage[];
+        hasMore: boolean;
+        sessionId: string | null;
+        oldestTimestamp?: string | null;
+        newestTimestamp?: string | null;
+        historyVersion?: string | null;
+      },
+    ) => {
+      const cache = historyCacheRef.current;
+      const previous = cache.get(windowId);
+      cache.delete(windowId);
+      cache.set(windowId, {
+        messages: entry.messages.slice(-HISTORY_CACHE_MAX_MESSAGES),
+        hasMore: entry.hasMore,
+        sessionId: entry.sessionId,
+        oldestTimestamp:
+          entry.oldestTimestamp ??
+          previous?.oldestTimestamp ??
+          firstTimestamp(entry.messages),
+        newestTimestamp: entry.newestTimestamp ?? latestTimestamp(entry.messages),
+        historyVersion: entry.historyVersion ?? previous?.historyVersion ?? null,
+      });
+      while (cache.size > HISTORY_CACHE_MAX_WINDOWS) {
+        const oldest = cache.keys().next().value;
+        if (!oldest) break;
+        cache.delete(oldest);
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     const previousWid = windowIdRef.current;
@@ -353,15 +455,88 @@ export function ChatView({
 
   const loadHistory = useCallback(() => {
     let cancelled = false;
-    setMessages([]);
-    setHasMore(false);
-    setHistoryLoaded(false);
+    const windowId = session.window_id;
+    const expectedSessionId = session.session_id;
+    const cached = historyCacheRef.current.get(windowId);
+    const cachedMatches =
+      !!cached &&
+      (!expectedSessionId || !cached.sessionId || cached.sessionId === expectedSessionId);
+
+    if (cached && cachedMatches) {
+      historyCacheRef.current.delete(windowId);
+      historyCacheRef.current.set(windowId, cached);
+      setMessages(cached.messages);
+      setHasMore(cached.hasMore);
+      hasMoreRef.current = cached.hasMore;
+      sessionIdRef.current = cached.sessionId ?? expectedSessionId;
+      setHistoryLoaded(true);
+    } else {
+      if (cached) historyCacheRef.current.delete(windowId);
+      setMessages([]);
+      setHasMore(false);
+      hasMoreRef.current = false;
+      setHistoryLoaded(false);
+    }
+
+    const refreshAfter =
+      cached && cachedMatches ? cached.newestTimestamp || undefined : undefined;
     api
-      .getMessages(session.window_id)
+      .getMessages(windowId, refreshAfter ? { after: refreshAfter } : undefined)
       .then((r) => {
         if (cancelled) return;
-        setMessages(r.messages.map(attachKey));
-        setHasMore(r.has_more);
+        if (windowIdRef.current !== windowId) return;
+        if (refreshAfter) {
+          const cacheWasRebased =
+            cached &&
+            cached.historyVersion &&
+            r.history_version &&
+            r.history_version !== cached.historyVersion &&
+            r.oldest_timestamp !== cached.oldestTimestamp;
+          if (cacheWasRebased) {
+            return api.getMessages(windowId).then((fresh) => {
+              if (cancelled) return;
+              if (windowIdRef.current !== windowId) return;
+              const loaded = fresh.messages.map(attachKey);
+              setMessages(loaded);
+              setHasMore(fresh.has_more);
+              hasMoreRef.current = fresh.has_more;
+              sessionIdRef.current = fresh.session_id;
+              storeHistoryCache(windowId, {
+                messages: loaded,
+                hasMore: fresh.has_more,
+                sessionId: fresh.session_id,
+                oldestTimestamp: fresh.oldest_timestamp ?? null,
+                newestTimestamp: responseNewestTimestamp(fresh),
+                historyVersion: fresh.history_version ?? null,
+              });
+            });
+          }
+          setMessages((prev) => {
+            const next = mergeAppendMessages(prev, r.messages);
+            storeHistoryCache(windowId, {
+              messages: next,
+              hasMore: hasMoreRef.current,
+              sessionId: r.session_id,
+              oldestTimestamp: r.oldest_timestamp ?? cached?.oldestTimestamp,
+              newestTimestamp: responseNewestTimestamp(r, next),
+              historyVersion: r.history_version ?? null,
+            });
+            return next;
+          });
+        } else {
+          const loaded = r.messages.map(attachKey);
+          setMessages(loaded);
+          setHasMore(r.has_more);
+          hasMoreRef.current = r.has_more;
+          storeHistoryCache(windowId, {
+            messages: loaded,
+            hasMore: r.has_more,
+            sessionId: r.session_id,
+            oldestTimestamp: r.oldest_timestamp ?? null,
+            newestTimestamp: responseNewestTimestamp(r),
+            historyVersion: r.history_version ?? null,
+          });
+        }
         sessionIdRef.current = r.session_id;
       })
       .catch((err: Error) => {
@@ -375,7 +550,7 @@ export function ChatView({
     return () => {
       cancelled = true;
     };
-  }, [session.window_id, showToast]);
+  }, [session.session_id, session.window_id, showToast, storeHistoryCache]);
 
   // Load history when session changes.
   useEffect(() => loadHistory(), [loadHistory]);
@@ -394,8 +569,20 @@ export function ChatView({
       api
         .getMessages(session.window_id, { before: oldest.timestamp })
         .then((r) => {
-          setMessages((prev) => [...r.messages.map(attachKey), ...prev]);
+          setMessages((prev) => {
+            const next = [...r.messages.map(attachKey), ...prev];
+            storeHistoryCache(session.window_id, {
+              messages: next,
+              hasMore: r.has_more,
+              sessionId: r.session_id,
+              oldestTimestamp: r.oldest_timestamp ?? null,
+              newestTimestamp: responseNewestTimestamp(r, next),
+              historyVersion: r.history_version ?? null,
+            });
+            return next;
+          });
           setHasMore(r.has_more);
+          hasMoreRef.current = r.has_more;
         })
         .catch((err: Error) => {
           pendingAnchorRef.current = null;
@@ -502,34 +689,16 @@ export function ChatView({
         if (windowIdRef.current !== wid) return;
         if (r.messages.length === 0) return;
         setMessages((prev) => {
-          if (prev.length === 0) return r.messages.map(attachKey);
-          // Two-key dedup: exact (timestamp+content) for messages that
-          // arrived via REST and content-only for ones that came in via
-          // WS (those have no timestamp in state). Without the content
-          // fallback, catch-up re-appends everything WS already showed.
-          const seenExact = new Set<string>();
-          const seenContent = new Set<string>();
-          for (const m of prev) {
-            const contentKey = `${m.role}|${m.content_type}|${m.text}`;
-            seenContent.add(contentKey);
-            if (m.timestamp) {
-              seenExact.add(`${m.timestamp}|${contentKey}`);
-            }
-          }
-          const fresh = r.messages
-            .filter((m) => {
-              const contentKey = `${m.role}|${m.content_type}|${m.text}`;
-              if (seenContent.has(contentKey)) return false;
-              if (
-                m.timestamp &&
-                seenExact.has(`${m.timestamp}|${contentKey}`)
-              ) {
-                return false;
-              }
-              return true;
-            })
-            .map(attachKey);
-          return fresh.length > 0 ? [...prev, ...fresh] : prev;
+          const next = mergeAppendMessages(prev, r.messages);
+          storeHistoryCache(wid, {
+            messages: next,
+            hasMore: hasMoreRef.current,
+            sessionId: r.session_id,
+            oldestTimestamp: r.oldest_timestamp ?? null,
+            newestTimestamp: responseNewestTimestamp(r, next),
+            historyVersion: r.history_version ?? null,
+          });
+          return next;
         });
       } catch {
         // Network blip — leave state alone, next reconnect will retry.
@@ -548,7 +717,7 @@ export function ChatView({
       window.removeEventListener("pageshow", onVisible);
       window.removeEventListener("focus", onVisible);
     };
-  }, []);
+  }, [storeHistoryCache]);
 
   // Subscribe to live updates.
   useEffect(() => {
@@ -581,19 +750,26 @@ export function ChatView({
       setStreaming(null);
 
       setMessages((prev) => {
+        let next: ChatMessage[];
         // Replace optimistic echo in place; keep _clientId so DOM node is reused.
         if (event.role === "user") {
           const idx = prev.findIndex(
             (m) => m.pending && m.role === "user" && m.text === event.text,
           );
           if (idx !== -1) {
-            const next = prev.slice();
+            next = prev.slice();
             next[idx] = {
               role: event.role,
               text: event.text,
               content_type: event.content_type,
               _clientId: prev[idx]._clientId,
             };
+            storeHistoryCache(windowIdRef.current, {
+              messages: next,
+              hasMore: hasMoreRef.current,
+              sessionId: event.session_id,
+              newestTimestamp: latestTimestamp(next),
+            });
             return next;
           }
         }
@@ -609,7 +785,7 @@ export function ChatView({
             m.text === event.text,
         );
         if (dup) return prev;
-        return [
+        next = [
           ...prev,
           attachKey({
             role: event.role,
@@ -617,9 +793,16 @@ export function ChatView({
             content_type: event.content_type,
           }),
         ];
+        storeHistoryCache(windowIdRef.current, {
+          messages: next,
+          hasMore: hasMoreRef.current,
+          sessionId: event.session_id,
+          newestTimestamp: latestTimestamp(next),
+        });
+        return next;
       });
     });
-  }, [subscribeWs]);
+  }, [storeHistoryCache, subscribeWs]);
 
   // Poll git branch for the current window. The pane cwd can drift if the
   // user `cd`s inside the shell, and there's no event for that, so polling
@@ -841,15 +1024,23 @@ export function ChatView({
             pendingAttachments.length === 1 ? "" : "s"
           }…)`
         : caption;
-      setMessages((prev) => [
-        ...prev,
-        attachKey({
-          role: "user",
-          text: optimisticText,
-          content_type: "text",
-          pending: true,
-        }),
-      ]);
+      setMessages((prev) => {
+        const next = [
+          ...prev,
+          attachKey({
+            role: "user",
+            text: optimisticText,
+            content_type: "text",
+            pending: true,
+          }),
+        ];
+        storeHistoryCache(session.window_id, {
+          messages: next,
+          hasMore: hasMoreRef.current,
+          sessionId: sessionIdRef.current,
+        });
+        return next;
+      });
       // Snap to own send regardless of read position.
       stickToBottomRef.current = true;
       setAtBottom(true);
@@ -880,6 +1071,11 @@ export function ChatView({
           if (idx === -1) return prev;
           const next = prev.slice();
           next[idx] = { ...next[idx], text: finalText };
+          storeHistoryCache(session.window_id, {
+            messages: next,
+            hasMore: hasMoreRef.current,
+            sessionId: sessionIdRef.current,
+          });
           return next;
         });
 
@@ -892,6 +1088,11 @@ export function ChatView({
           if (idx === -1) return prev;
           const next = prev.slice();
           next.splice(idx, 1);
+          storeHistoryCache(session.window_id, {
+            messages: next,
+            hasMore: hasMoreRef.current,
+            sessionId: sessionIdRef.current,
+          });
           return next;
         });
         setText((cur) => (cur ? cur : payload));
@@ -907,7 +1108,7 @@ export function ChatView({
       showToast,
       handleBotCommand,
       attachments,
-      scrollToBottom,
+      storeHistoryCache,
     ],
   );
 
@@ -1101,6 +1302,9 @@ export function ChatView({
                   void onCommand("/clear");
                   setMessages([]);
                   setHasMore(false);
+                  hasMoreRef.current = false;
+                  sessionIdRef.current = null;
+                  historyCacheRef.current.delete(session.window_id);
                   setStreaming(null);
                   showToast("Cleared — /clear sent to agent");
                 }}

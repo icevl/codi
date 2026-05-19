@@ -13,6 +13,7 @@ import logging
 import re
 import shutil
 import time
+from collections import OrderedDict
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -23,7 +24,7 @@ import aiofiles
 from .config import config
 from .runtimes import get_runtime
 from .tmux_manager import tmux_manager
-from .transcript_parser import TranscriptParser
+from .transcript_parser import PendingToolInfo, TranscriptParser
 from .utils import atomic_write_json
 
 logger = logging.getLogger(__name__)
@@ -103,6 +104,31 @@ class CodexSession:
 
 
 @dataclass
+class HistorySnapshot:
+    """Parsed transcript history plus metadata for efficient web paging."""
+
+    messages: list[dict[str, Any]]
+    total_count: int
+    oldest_timestamp: str | None
+    newest_timestamp: str | None
+    history_version: str
+
+
+@dataclass
+class _HistoryCacheEntry:
+    session_id: str
+    file_path: str
+    size: int
+    mtime_ns: int
+    messages: list[dict[str, Any]]
+    pending_tools: dict[str, PendingToolInfo]
+
+    @property
+    def history_version(self) -> str:
+        return f"{self.size}:{self.mtime_ns}:{len(self.messages)}"
+
+
+@dataclass
 class SessionManager:
     """Manages bindings and Codex session resolution."""
 
@@ -130,6 +156,12 @@ class SessionManager:
     # — only ~172 stat() calls per scan after the cache is warm.
     _session_meta_cache: dict[Path, tuple[float, tuple[str, str]]] = field(
         default_factory=dict, init=False, repr=False
+    )
+    _history_cache: OrderedDict[str, _HistoryCacheEntry] = field(
+        default_factory=OrderedDict, init=False, repr=False
+    )
+    _history_cache_lock: asyncio.Lock = field(
+        default_factory=asyncio.Lock, init=False, repr=False
     )
     _force_status_probe_windows: set[str] = field(
         default_factory=set, init=False, repr=False
@@ -1014,6 +1046,10 @@ class SessionManager:
         start_byte: int = 0,
         end_byte: int | None = None,
     ) -> tuple[list[dict], int]:
+        if start_byte == 0 and end_byte is None:
+            snapshot = await self.get_history_snapshot(window_id)
+            return snapshot.messages, snapshot.total_count
+
         session = await self.resolve_session_for_window(window_id)
         if not session or not session.file_path:
             return [], 0
@@ -1056,6 +1092,146 @@ class SessionManager:
             for e in parsed_entries
         ]
         return messages, len(messages)
+
+    async def get_history_snapshot(self, window_id: str) -> HistorySnapshot:
+        """Return cached parsed transcript history for a window."""
+        session = await self.resolve_session_for_window(window_id)
+        if not session or not session.file_path:
+            return HistorySnapshot([], 0, None, None, "")
+
+        file_path = Path(session.file_path)
+        if not file_path.exists():
+            return HistorySnapshot([], 0, None, None, "")
+
+        try:
+            entry = await self._get_history_cache_entry(session, file_path)
+        except OSError as e:
+            logger.error("Error reading session file %s: %s", file_path, e)
+            return HistorySnapshot([], 0, None, None, "")
+
+        messages = list(entry.messages)
+        return HistorySnapshot(
+            messages=messages,
+            total_count=len(messages),
+            oldest_timestamp=_first_timestamp(messages),
+            newest_timestamp=_last_timestamp(messages),
+            history_version=entry.history_version,
+        )
+
+    async def _get_history_cache_entry(
+        self, session: CodexSession, file_path: Path
+    ) -> _HistoryCacheEntry:
+        cache_key = f"{session.session_id}:{file_path}"
+        stat = file_path.stat()
+        async with self._history_cache_lock:
+            cached = self._history_cache.get(cache_key)
+            if (
+                cached is not None
+                and cached.size == stat.st_size
+                and cached.mtime_ns == stat.st_mtime_ns
+            ):
+                self._touch_history_cache(cache_key)
+                return cached
+
+            if (
+                cached is not None
+                and not cached.pending_tools
+                and cached.size < stat.st_size
+                and cached.file_path == str(file_path)
+                and cached.session_id == session.session_id
+            ):
+                appended = await self._read_transcript_entries(
+                    file_path, start_byte=cached.size, end_byte=stat.st_size
+                )
+                if appended:
+                    parsed_entries, pending_tools = TranscriptParser.parse_entries(
+                        appended, pending_tools={}
+                    )
+                    cached.messages.extend(_messages_from_parsed(parsed_entries))
+                    cached.pending_tools = pending_tools
+                cached.size = stat.st_size
+                cached.mtime_ns = stat.st_mtime_ns
+                self._touch_history_cache(cache_key)
+                return cached
+
+            entries = await self._read_transcript_entries(file_path)
+            parsed_entries, pending_tools = TranscriptParser.parse_entries(entries)
+            rebuilt = _HistoryCacheEntry(
+                session_id=session.session_id,
+                file_path=str(file_path),
+                size=stat.st_size,
+                mtime_ns=stat.st_mtime_ns,
+                messages=_messages_from_parsed(parsed_entries),
+                pending_tools=pending_tools,
+            )
+            self._history_cache[cache_key] = rebuilt
+            self._touch_history_cache(cache_key)
+            self._trim_history_cache()
+            return rebuilt
+
+    async def _read_transcript_entries(
+        self,
+        file_path: Path,
+        *,
+        start_byte: int = 0,
+        end_byte: int | None = None,
+    ) -> list[dict]:
+        entries: list[dict] = []
+        async with aiofiles.open(file_path, "r", encoding="utf-8") as f:
+            if start_byte > 0:
+                await f.seek(start_byte)
+
+            while True:
+                if end_byte is not None:
+                    cur = await f.tell()
+                    if cur >= end_byte:
+                        break
+
+                line = await f.readline()
+                if not line:
+                    break
+
+                data = TranscriptParser.parse_line(line)
+                if data:
+                    entries.append(data)
+        return entries
+
+    def _touch_history_cache(self, cache_key: str) -> None:
+        if cache_key in self._history_cache:
+            self._history_cache.move_to_end(cache_key)
+
+    def _trim_history_cache(self) -> None:
+        max_entries = max(1, config.history_cache_max_sessions)
+        while len(self._history_cache) > max_entries:
+            self._history_cache.popitem(last=False)
+
+
+def _messages_from_parsed(parsed_entries: list[Any]) -> list[dict[str, Any]]:
+    return [
+        {
+            "role": e.role,
+            "text": e.text,
+            "content_type": e.content_type,
+            "timestamp": e.timestamp,
+        }
+        for e in parsed_entries
+    ]
+
+
+def _first_timestamp(messages: list[dict[str, Any]]) -> str | None:
+    for message in messages:
+        timestamp = message.get("timestamp")
+        if isinstance(timestamp, str) and timestamp:
+            return timestamp
+    return None
+
+
+def _last_timestamp(messages: list[dict[str, Any]]) -> str | None:
+    for message in reversed(messages):
+        timestamp = message.get("timestamp")
+        if isinstance(timestamp, str) and timestamp:
+            return timestamp
+    return None
 
 
 session_manager = SessionManager()

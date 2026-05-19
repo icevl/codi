@@ -9,7 +9,7 @@ Endpoints (all under `/api` unless stated):
   POST /api/sessions                 create new window (cwd, runtime[, resume])
   DELETE /api/sessions/{wid}         kill window
   PATCH  /api/sessions/{wid}         rename window
-  GET  /api/sessions/{wid}/messages?limit=N&before=ISO → paginated history
+  GET  /api/sessions/{wid}/messages?limit=N&before=ISO&after=ISO → paginated history
   GET  /api/sessions/{wid}/git       {is_repo, branch} for the pane's cwd
   GET  /api/sessions/{wid}/branches  {is_repo, current, branches[]} — local heads
   POST /api/sessions/{wid}/switch-branch {branch} — runs `git switch`
@@ -625,7 +625,8 @@ def create_app(
         after: str | None = Query(None),
         _user: str = Depends(require_auth),
     ) -> dict[str, Any]:
-        all_messages, _count = await session_manager.get_recent_messages(window_id)
+        history = await session_manager.get_history_snapshot(window_id)
+        all_messages = history.messages
         session = await session_manager.resolve_session_for_window(window_id)
 
         # ISO timestamps compare lexicographically.
@@ -645,6 +646,9 @@ def create_app(
             "messages": messages,
             "session_id": session.session_id if session else None,
             "has_more": has_more,
+            "oldest_timestamp": history.oldest_timestamp,
+            "newest_timestamp": history.newest_timestamp,
+            "history_version": history.history_version,
         }
 
     async def _resolve_window_cwd(window_id: str) -> str:
