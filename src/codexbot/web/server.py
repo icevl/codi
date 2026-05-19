@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import socket
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Optional
 
@@ -32,6 +33,19 @@ logger = logging.getLogger(__name__)
 
 
 Listener = Callable[[NewMessage], Awaitable[None]]
+WEB_SHUTDOWN_TIMEOUT_SECONDS = 5.0
+
+
+class EmbeddedUvicornServer(uvicorn.Server):
+    """Uvicorn server variant for running inside the bot's event loop.
+
+    `Server.serve()` captures process signals in the main thread. Codi already
+    runs under python-telegram-bot's lifecycle, so the embedded web server must
+    not install competing signal handlers.
+    """
+
+    async def serve(self, sockets: list[socket.socket] | None = None) -> None:
+        await self._serve(sockets)
 
 
 class WebServerHandle:
@@ -116,9 +130,7 @@ async def start_web_server(
         loop="asyncio",
         lifespan="on",
     )
-    server = uvicorn.Server(server_config)
-    server.config.load()
-    server.lifespan = server.config.lifespan_class(server.config)
+    server = EmbeddedUvicornServer(server_config)
 
     task = asyncio.create_task(server.serve(), name="codexbot-web-server")
     stream_task = asyncio.create_task(
@@ -144,20 +156,28 @@ async def stop_web_server(monitor: SessionMonitor | None = None) -> None:
         return
     if monitor is not None and handle.listener is not None:
         monitor.remove_listener(handle.listener)
+    await handle.bus.close()
     if handle.stream_task is not None:
         handle.stream_task.cancel()
         try:
-            await handle.stream_task
+            await asyncio.wait_for(
+                handle.stream_task, timeout=WEB_SHUTDOWN_TIMEOUT_SECONDS
+            )
+        except asyncio.TimeoutError:
+            logger.warning("Pane streaming task did not stop within shutdown timeout")
         except (asyncio.CancelledError, Exception):  # noqa: BLE001
             pass
     handle.server.should_exit = True
     try:
-        await asyncio.wait_for(handle.task, timeout=5.0)
+        await asyncio.wait_for(handle.task, timeout=WEB_SHUTDOWN_TIMEOUT_SECONDS)
     except asyncio.TimeoutError:
-        logger.warning("Web server did not shut down within 5s, cancelling")
+        logger.warning("Web server did not shut down within shutdown timeout")
+        handle.server.force_exit = True
         handle.task.cancel()
         try:
-            await handle.task
+            await asyncio.wait_for(handle.task, timeout=WEB_SHUTDOWN_TIMEOUT_SECONDS)
+        except asyncio.TimeoutError:
+            logger.warning("Web server task did not cancel within shutdown timeout")
         except (asyncio.CancelledError, Exception):  # noqa: BLE001
             pass
     logger.info("Web UI stopped")

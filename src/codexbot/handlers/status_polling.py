@@ -136,83 +136,91 @@ async def status_poll_loop(bot: Bot) -> None:
     global _status_poll_heartbeat
     logger.info("Status polling started (interval: %ss)", STATUS_POLL_INTERVAL)
     last_topic_check = 0.0
-    while True:
-        _status_poll_heartbeat = time.monotonic()
-        try:
-            # Periodic topic existence probe
-            now = time.monotonic()
-            if now - last_topic_check >= TOPIC_CHECK_INTERVAL:
-                last_topic_check = now
-                for user_id, thread_id, wid in list(
-                    session_manager.iter_thread_bindings()
-                ):
-                    try:
-                        await bot.unpin_all_forum_topic_messages(
-                            chat_id=session_manager.resolve_chat_id(user_id, thread_id),
-                            message_thread_id=thread_id,
-                        )
-                    except BadRequest as e:
-                        if "Topic_id_invalid" in str(e):
-                            # Topic deleted — kill window, unbind, and clean up state
-                            w = await tmux_manager.find_window_by_id(wid)
-                            if w:
-                                await tmux_manager.kill_window(w.window_id)
-                            session_manager.unbind_thread(user_id, thread_id)
-                            await clear_topic_state(user_id, thread_id, bot)
-                            logger.info(
-                                "Topic deleted: killed window_id '%s' and "
-                                "unbound thread %d for user %d",
-                                wid,
-                                thread_id,
-                                user_id,
+    try:
+        while True:
+            _status_poll_heartbeat = time.monotonic()
+            try:
+                # Periodic topic existence probe
+                now = time.monotonic()
+                if now - last_topic_check >= TOPIC_CHECK_INTERVAL:
+                    last_topic_check = now
+                    for user_id, thread_id, wid in list(
+                        session_manager.iter_thread_bindings()
+                    ):
+                        try:
+                            await bot.unpin_all_forum_topic_messages(
+                                chat_id=session_manager.resolve_chat_id(
+                                    user_id, thread_id
+                                ),
+                                message_thread_id=thread_id,
                             )
-                        else:
+                        except BadRequest as e:
+                            if "Topic_id_invalid" in str(e):
+                                # Topic deleted — kill window, unbind, and clean up state
+                                w = await tmux_manager.find_window_by_id(wid)
+                                if w:
+                                    await tmux_manager.kill_window(w.window_id)
+                                session_manager.unbind_thread(user_id, thread_id)
+                                await clear_topic_state(user_id, thread_id, bot)
+                                logger.info(
+                                    "Topic deleted: killed window_id '%s' and "
+                                    "unbound thread %d for user %d",
+                                    wid,
+                                    thread_id,
+                                    user_id,
+                                )
+                            else:
+                                logger.debug(
+                                    "Topic probe error for %s: %s",
+                                    wid,
+                                    e,
+                                )
+                        except Exception as e:
                             logger.debug(
                                 "Topic probe error for %s: %s",
                                 wid,
                                 e,
                             )
+
+                for user_id, thread_id, wid in list(
+                    session_manager.iter_thread_bindings()
+                ):
+                    try:
+                        # Clean up stale bindings (window no longer exists)
+                        w = await tmux_manager.find_window_by_id(wid)
+                        if not w:
+                            session_manager.unbind_thread(user_id, thread_id)
+                            await clear_topic_state(user_id, thread_id, bot)
+                            logger.info(
+                                "Cleaned up stale binding: user=%d thread=%d window_id=%s",
+                                user_id,
+                                thread_id,
+                                wid,
+                            )
+                            continue
+
+                        # UI detection happens unconditionally in update_status_message.
+                        # Status enqueue is skipped inside update_status_message when
+                        # interactive UI is detected (returns early) or when queue is non-empty.
+                        queue = get_message_queue(user_id, thread_id)
+                        skip_status = queue is not None and not queue.empty()
+
+                        await update_status_message(
+                            bot,
+                            user_id,
+                            wid,
+                            thread_id=thread_id,
+                            skip_status=skip_status,
+                        )
                     except Exception as e:
                         logger.debug(
-                            "Topic probe error for %s: %s",
-                            wid,
-                            e,
+                            f"Status update error for user {user_id} "
+                            f"thread {thread_id}: {e}"
                         )
+            except Exception as e:
+                logger.error(f"Status poll loop error: {e}")
 
-            for user_id, thread_id, wid in list(session_manager.iter_thread_bindings()):
-                try:
-                    # Clean up stale bindings (window no longer exists)
-                    w = await tmux_manager.find_window_by_id(wid)
-                    if not w:
-                        session_manager.unbind_thread(user_id, thread_id)
-                        await clear_topic_state(user_id, thread_id, bot)
-                        logger.info(
-                            "Cleaned up stale binding: user=%d thread=%d window_id=%s",
-                            user_id,
-                            thread_id,
-                            wid,
-                        )
-                        continue
-
-                    # UI detection happens unconditionally in update_status_message.
-                    # Status enqueue is skipped inside update_status_message when
-                    # interactive UI is detected (returns early) or when queue is non-empty.
-                    queue = get_message_queue(user_id, thread_id)
-                    skip_status = queue is not None and not queue.empty()
-
-                    await update_status_message(
-                        bot,
-                        user_id,
-                        wid,
-                        thread_id=thread_id,
-                        skip_status=skip_status,
-                    )
-                except Exception as e:
-                    logger.debug(
-                        f"Status update error for user {user_id} "
-                        f"thread {thread_id}: {e}"
-                    )
-        except Exception as e:
-            logger.error(f"Status poll loop error: {e}")
-
-        await asyncio.sleep(STATUS_POLL_INTERVAL)
+            await asyncio.sleep(STATUS_POLL_INTERVAL)
+    except asyncio.CancelledError:
+        logger.info("Status polling cancelled")
+        raise

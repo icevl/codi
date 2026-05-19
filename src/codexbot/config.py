@@ -295,6 +295,9 @@ class Config:
             os.getenv("CODEXBOT_TOPIC_CHECK_INTERVAL", "60.0")
         )
         self.queue_maxsize = max(1, int(os.getenv("CODEXBOT_QUEUE_MAXSIZE", "500")))
+        self.queue_drain_timeout_seconds = max(
+            0.1, float(os.getenv("CODEXBOT_QUEUE_DRAIN_TIMEOUT_SECONDS", "5.0"))
+        )
         self.session_detect_timeout = float(
             os.getenv("CODEXBOT_SESSION_DETECT_TIMEOUT", "12.0")
         )

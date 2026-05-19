@@ -608,48 +608,54 @@ class SessionMonitor:
         global _monitor_heartbeat
         logger.info("Session monitor started, polling every %ss", self.poll_interval)
 
-        from .session import session_manager
+        try:
+            from .session import session_manager
 
-        await self._cleanup_all_stale_sessions()
-        self._last_window_sessions = await self._load_current_window_sessions()
-        bootstrap_cycle = True
+            await self._cleanup_all_stale_sessions()
+            self._last_window_sessions = await self._load_current_window_sessions()
+            bootstrap_cycle = True
 
-        while self._running:
-            _monitor_heartbeat = time.monotonic()
-            try:
-                await session_manager.load_session_map()
-                current_map = await self._detect_and_cleanup_changes()
-                active_session_ids = set(current_map.values())
-                new_messages = await self.check_for_updates(
-                    active_session_ids,
-                    bootstrap=bootstrap_cycle,
-                )
+            while self._running:
+                _monitor_heartbeat = time.monotonic()
+                try:
+                    await session_manager.load_session_map()
+                    current_map = await self._detect_and_cleanup_changes()
+                    active_session_ids = set(current_map.values())
+                    new_messages = await self.check_for_updates(
+                        active_session_ids,
+                        bootstrap=bootstrap_cycle,
+                    )
 
-                for msg in new_messages:
-                    status = "complete" if msg.is_complete else "streaming"
-                    preview = msg.text[:80] + ("..." if len(msg.text) > 80 else "")
-                    logger.info("[%s] session=%s: %s", status, msg.session_id, preview)
-                    # Extra listeners (web bus) are fan-out into asyncio.Queue
-                    # objects — virtually instant. Dispatch them FIRST so the
-                    # WebSocket subscribers don't wait behind blocking Telegram
-                    # API calls in the primary callback.
-                    for listener in list(self._extra_listeners):
-                        try:
-                            await listener(msg)
-                        except Exception as e:
-                            logger.error("Extra listener error: %s", e)
-                    if self._message_callback:
-                        try:
-                            await self._message_callback(msg)
-                        except Exception as e:
-                            logger.error("Message callback error: %s", e)
-            except Exception as e:
-                logger.error("Monitor loop error: %s", e)
+                    for msg in new_messages:
+                        status = "complete" if msg.is_complete else "streaming"
+                        preview = msg.text[:80] + ("..." if len(msg.text) > 80 else "")
+                        logger.info(
+                            "[%s] session=%s: %s", status, msg.session_id, preview
+                        )
+                        # Extra listeners (web bus) are fan-out into asyncio.Queue
+                        # objects — virtually instant. Dispatch them FIRST so the
+                        # WebSocket subscribers don't wait behind blocking Telegram
+                        # API calls in the primary callback.
+                        for listener in list(self._extra_listeners):
+                            try:
+                                await listener(msg)
+                            except Exception as e:
+                                logger.error("Extra listener error: %s", e)
+                        if self._message_callback:
+                            try:
+                                await self._message_callback(msg)
+                            except Exception as e:
+                                logger.error("Message callback error: %s", e)
+                except Exception as e:
+                    logger.error("Monitor loop error: %s", e)
 
-            bootstrap_cycle = False
-            await asyncio.sleep(self.poll_interval)
+                bootstrap_cycle = False
+                await asyncio.sleep(self.poll_interval)
 
-        logger.info("Session monitor stopped")
+            logger.info("Session monitor stopped")
+        except asyncio.CancelledError:
+            logger.info("Session monitor cancelled")
+            raise
 
     def start(self) -> None:
         if self._running:

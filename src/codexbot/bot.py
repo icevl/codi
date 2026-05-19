@@ -141,6 +141,7 @@ from .handlers.message_queue import (
     get_queue_health,
     get_message_queue,
     get_diagnostic_events,
+    record_queue_diagnostic_event,
     shutdown_workers,
 )
 from .handlers.message_sender import (
@@ -457,7 +458,23 @@ async def _drain_thread_queue(user_id: int, thread_id: int | None) -> None:
     """Drain the current thread's queue before mutating terminal state."""
     queue = get_message_queue(user_id, thread_id)
     if queue is not None:
-        await queue.join()
+        try:
+            await asyncio.wait_for(
+                queue.join(), timeout=config.queue_drain_timeout_seconds
+            )
+        except asyncio.TimeoutError:
+            logger.warning(
+                "Timed out waiting %.1fs for queue drain user=%d thread=%s",
+                config.queue_drain_timeout_seconds,
+                user_id,
+                thread_id,
+            )
+            record_queue_diagnostic_event(
+                user_id=user_id,
+                thread_id=thread_id,
+                event="drain_timeout",
+                reason=f"{config.queue_drain_timeout_seconds:.1f}s",
+            )
 
 
 def _interactive_prompt_key(user_id: int, thread_id: int | None) -> tuple[int, int]:
@@ -4391,9 +4408,7 @@ async def handle_new_message(msg: NewMessage, bot: Bot) -> None:
             # Mark interactive mode BEFORE sleeping so polling skips this window
             set_interactive_mode(user_id, wid, thread_id)
             # Flush pending messages (e.g. plan content) before sending interactive UI
-            queue = get_message_queue(user_id, thread_id)
-            if queue:
-                await queue.join()
+            await _drain_thread_queue(user_id, thread_id)
             # Wait briefly for Codex to render the question UI
             await asyncio.sleep(0.3)
             handled = await handle_interactive_ui(bot, user_id, wid, thread_id)

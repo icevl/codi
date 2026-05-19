@@ -32,12 +32,18 @@ logger = logging.getLogger(__name__)
 class EventBus:
     """Fan-out hub for web subscribers."""
 
+    SHUTDOWN_EVENT_TYPE = "__shutdown__"
+
     def __init__(self, *, queue_size: int = 256) -> None:
         self._subscribers: set[asyncio.Queue[dict[str, Any]]] = set()
         self._queue_size = queue_size
+        self._closed = False
 
     def subscribe(self) -> asyncio.Queue[dict[str, Any]]:
         q: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=self._queue_size)
+        if self._closed:
+            self._put_shutdown(q)
+            return q
         self._subscribers.add(q)
         return q
 
@@ -48,7 +54,29 @@ class EventBus:
     def subscriber_count(self) -> int:
         return len(self._subscribers)
 
+    def _put_shutdown(self, q: asyncio.Queue[dict[str, Any]]) -> None:
+        event = {"type": self.SHUTDOWN_EVENT_TYPE}
+        while True:
+            try:
+                q.put_nowait(event)
+                return
+            except asyncio.QueueFull:
+                try:
+                    q.get_nowait()
+                except asyncio.QueueEmpty:
+                    return
+
+    async def close(self) -> None:
+        """Wake all subscribers so websocket handlers can exit during shutdown."""
+        if self._closed:
+            return
+        self._closed = True
+        for q in list(self._subscribers):
+            self._put_shutdown(q)
+
     async def publish(self, event: dict[str, Any]) -> None:
+        if self._closed:
+            return
         event.setdefault("ts", time.time())
         dead: list[asyncio.Queue[dict[str, Any]]] = []
         for q in self._subscribers:

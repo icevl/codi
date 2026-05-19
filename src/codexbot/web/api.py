@@ -1262,17 +1262,22 @@ def create_app(
                         except Exception:
                             pass
 
+        pty_tasks = {
+            asyncio.create_task(pty_to_ws(), name=f"term-pty-to-ws-{window_id}"),
+            asyncio.create_task(ws_to_pty(), name=f"term-ws-to-pty-{window_id}"),
+        }
         try:
-            done, pending = await asyncio.wait(
-                {
-                    asyncio.create_task(pty_to_ws()),
-                    asyncio.create_task(ws_to_pty()),
-                },
+            _done, pending = await asyncio.wait(
+                pty_tasks,
                 return_when=asyncio.FIRST_COMPLETED,
             )
             for task in pending:
                 task.cancel()
         finally:
+            for task in pty_tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*pty_tasks, return_exceptions=True)
             try:
                 loop.remove_reader(master_fd)
             except Exception:
@@ -1333,8 +1338,12 @@ def create_app(
             )
             while True:
                 event = await queue.get()
+                if event.get("type") == bus.SHUTDOWN_EVENT_TYPE:
+                    break
                 await websocket.send_json(event)
         except WebSocketDisconnect:
+            pass
+        except asyncio.CancelledError:
             pass
         except Exception as exc:  # noqa: BLE001
             logger.info("WebSocket disconnected with error: %s", exc)

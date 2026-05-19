@@ -203,6 +203,7 @@ Open the web UI at `http://127.0.0.1:8787` and/or message your Telegram bot.
 | `MONITOR_POLL_INTERVAL`             | `2.0`                   | JSONL polling interval (seconds)                                  |
 | `CODEXBOT_STATUS_POLL_INTERVAL`     | `1.0`                   | Status-line polling interval (seconds)                            |
 | `CODEXBOT_QUEUE_MAXSIZE`            | `500`                   | Per-topic queue size before backpressure/coalescing               |
+| `CODEXBOT_QUEUE_DRAIN_TIMEOUT_SECONDS` | `5.0`                | Max wait before user actions continue past a stuck topic queue    |
 | `CODEXBOT_SHOW_HIDDEN_DIRS`         | `false`                 | Show dot-directories in the directory browser                     |
 | `OPENAI_API_KEY`                    | _none_                  | API key for voice transcription                                   |
 | `OPENAI_BASE_URL`                   | OpenAI default          | Override for compatible providers (Azure, vLLM, etc.)             |

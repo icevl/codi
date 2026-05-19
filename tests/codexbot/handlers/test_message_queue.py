@@ -1,5 +1,6 @@
 """Tests for completion ordering and status behavior in message queue worker."""
 
+import asyncio
 import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -840,4 +841,54 @@ class TestMessageQueueCompletionOrdering:
         mock_convert.assert_not_awaited()
         assert sent_parts == ["✅ done"]
 
+        await mq.shutdown_workers()
+
+
+class TestMessageQueueLiveness:
+    @pytest.mark.asyncio
+    async def test_get_or_create_queue_restarts_done_worker(self) -> None:
+        await mq.shutdown_workers()
+        mq._completion_diagnostic_events.clear()
+
+        bot = AsyncMock()
+        queue = get_or_create_queue(bot, user_id=20, thread_id=30)
+        original_worker = mq._queue_workers[(20, 30)]
+        original_worker.cancel()
+        await asyncio.gather(original_worker, return_exceptions=True)
+        assert original_worker.done()
+
+        same_queue = get_or_create_queue(bot, user_id=20, thread_id=30)
+        restarted_worker = mq._queue_workers[(20, 30)]
+
+        assert same_queue is queue
+        assert restarted_worker is not original_worker
+        assert not restarted_worker.done()
+        events = mq.get_diagnostic_events(20, thread_id=30)
+        assert events[-1]["event"] == "worker_restarted"
+
+        await mq.shutdown_workers()
+
+    @pytest.mark.asyncio
+    async def test_bounded_drain_records_timeout_and_returns(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        await mq.shutdown_workers()
+        mq._completion_diagnostic_events.clear()
+
+        from codexbot import bot as bot_mod
+
+        monkeypatch.setattr(
+            bot_mod.config, "queue_drain_timeout_seconds", 0.01, raising=False
+        )
+        key = (21, 31)
+        queue: asyncio.Queue[mq.MessageTask] = asyncio.Queue()
+        queue.put_nowait(mq.MessageTask(task_type="status_update", text="busy"))
+        mq._message_queues[key] = queue
+
+        await bot_mod._drain_thread_queue(21, 31)
+
+        events = mq.get_diagnostic_events(21, thread_id=31)
+        assert events[-1]["event"] == "drain_timeout"
+
+        mq._message_queues.pop(key, None)
         await mq.shutdown_workers()

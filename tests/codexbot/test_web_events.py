@@ -79,3 +79,38 @@ async def test_slow_subscriber_dropped() -> None:
     # And no further deliveries.
     await bus.publish({"type": "d"})
     assert q.empty()
+
+
+@pytest.mark.asyncio
+async def test_close_wakes_subscriber() -> None:
+    bus = EventBus()
+    q = bus.subscribe()
+
+    await bus.close()
+
+    event = await asyncio.wait_for(q.get(), timeout=0.5)
+    assert event["type"] == EventBus.SHUTDOWN_EVENT_TYPE
+
+
+@pytest.mark.asyncio
+async def test_close_wakes_full_subscriber_queue() -> None:
+    bus = EventBus(queue_size=1)
+    q = bus.subscribe()
+    await bus.publish({"type": "old"})
+
+    await bus.close()
+
+    event = await asyncio.wait_for(q.get(), timeout=0.5)
+    assert event["type"] == EventBus.SHUTDOWN_EVENT_TYPE
+
+
+@pytest.mark.asyncio
+async def test_publish_after_close_is_ignored() -> None:
+    bus = EventBus()
+    q = bus.subscribe()
+    await bus.close()
+    await q.get()
+
+    await bus.publish({"type": "late"})
+
+    assert q.empty()

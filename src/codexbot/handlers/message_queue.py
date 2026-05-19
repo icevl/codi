@@ -118,6 +118,7 @@ _completion_diagnostic_events: dict[
 
 # Max seconds to wait for flood control before dropping tasks
 FLOOD_CONTROL_MAX_WAIT = 10
+QUEUE_WORKER_SHUTDOWN_TIMEOUT_SECONDS = 5.0
 
 
 def _queue_key(user_id: int, thread_id: int | None = None) -> tuple[int, int]:
@@ -140,9 +141,37 @@ def get_or_create_queue(
     if key not in _message_queues:
         _message_queues[key] = asyncio.Queue(maxsize=max(1, config.queue_maxsize))
         _queue_locks[key] = asyncio.Lock()
-        # Start worker task for this user/thread lane
+
+    if key not in _queue_locks:
+        _queue_locks[key] = asyncio.Lock()
+
+    worker = _queue_workers.get(key)
+    if worker is None or worker.done():
+        if worker is not None:
+            reason = "cancelled"
+            if not worker.cancelled():
+                try:
+                    exc = worker.exception()
+                except Exception as err:  # noqa: BLE001
+                    reason = type(err).__name__
+                else:
+                    reason = type(exc).__name__ if exc is not None else "done"
+            logger.warning(
+                "Restarting stopped message queue worker for user=%d thread=%d (%s)",
+                key[0],
+                key[1],
+                reason,
+            )
+            record_queue_diagnostic_event(
+                user_id=key[0],
+                thread_id=thread_id,
+                event="worker_restarted",
+                reason=reason,
+            )
+        # Start worker task for this user/thread lane.
         _queue_workers[key] = asyncio.create_task(
-            _message_queue_worker(bot, key[0], key[1])
+            _message_queue_worker(bot, key[0], key[1]),
+            name=f"codexbot-message-queue-{key[0]}-{key[1]}",
         )
     return _message_queues[key]
 
@@ -302,6 +331,28 @@ def _record_completion_diagnostic_event(
             "queue_attempt": queue_attempt,
             "reason": reason,
         }
+    )
+
+
+def record_queue_diagnostic_event(
+    *,
+    user_id: int,
+    thread_id: int | None,
+    event: str,
+    reason: str | None = None,
+    window_id: str | None = None,
+) -> None:
+    """Record queue-level diagnostics in the same bounded lane history."""
+    _record_completion_diagnostic_event(
+        user_id=user_id,
+        thread_id_or_0=_queue_key(user_id, thread_id)[1],
+        event=event,
+        task_type="queue",
+        window_id=window_id,
+        session_id=None,
+        turn_id=None,
+        queue_attempt=0,
+        reason=reason,
     )
 
 
@@ -655,6 +706,13 @@ async def _message_queue_worker(bot: Bot, user_id: int, thread_id_or_0: int) -> 
                         delay = _normalize_retry_after(e)
                         if delay > FLOOD_CONTROL_MAX_WAIT:
                             _flood_until[queue_key] = time.monotonic() + delay
+                            record_queue_diagnostic_event(
+                                user_id=user_id,
+                                thread_id=thread_id_or_0 or None,
+                                event="flood_wait",
+                                reason=f"RetryAfter:{delay}",
+                                window_id=task.window_id,
+                            )
                             logger.warning(
                                 "Flood control for user %d thread %d: retry_after=%ds, "
                                 "pausing queue until ban expires",
@@ -1333,12 +1391,19 @@ def clear_tool_msg_ids_for_topic(user_id: int, thread_id: int | None = None) -> 
 
 async def shutdown_workers() -> None:
     """Stop all queue workers (called during bot shutdown)."""
-    for _, worker in list(_queue_workers.items()):
+    workers = list(_queue_workers.items())
+    for _, worker in workers:
         worker.cancel()
+    if workers:
         try:
-            await worker
-        except asyncio.CancelledError:
-            pass
+            await asyncio.wait_for(
+                asyncio.gather(
+                    *(worker for _, worker in workers), return_exceptions=True
+                ),
+                timeout=QUEUE_WORKER_SHUTDOWN_TIMEOUT_SECONDS,
+            )
+        except asyncio.TimeoutError:
+            logger.warning("Timed out waiting for message queue workers to stop")
     _queue_workers.clear()
     _message_queues.clear()
     _queue_locks.clear()
