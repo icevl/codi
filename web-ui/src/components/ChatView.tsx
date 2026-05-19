@@ -498,18 +498,31 @@ export function ChatView({
         if (r.messages.length === 0) return;
         setMessages((prev) => {
           if (prev.length === 0) return r.messages.map(attachKey);
-          const seen = new Set<string>();
+          // Two-key dedup: exact (timestamp+content) for messages that
+          // arrived via REST and content-only for ones that came in via
+          // WS (those have no timestamp in state). Without the content
+          // fallback, catch-up re-appends everything WS already showed.
+          const seenExact = new Set<string>();
+          const seenContent = new Set<string>();
           for (const m of prev) {
+            const contentKey = `${m.role}|${m.content_type}|${m.text}`;
+            seenContent.add(contentKey);
             if (m.timestamp) {
-              seen.add(`${m.timestamp}|${m.role}|${m.content_type}|${m.text}`);
+              seenExact.add(`${m.timestamp}|${contentKey}`);
             }
           }
           const fresh = r.messages
-            .filter(
-              (m) =>
-                !m.timestamp ||
-                !seen.has(`${m.timestamp}|${m.role}|${m.content_type}|${m.text}`),
-            )
+            .filter((m) => {
+              const contentKey = `${m.role}|${m.content_type}|${m.text}`;
+              if (seenContent.has(contentKey)) return false;
+              if (
+                m.timestamp &&
+                seenExact.has(`${m.timestamp}|${contentKey}`)
+              ) {
+                return false;
+              }
+              return true;
+            })
             .map(attachKey);
           return fresh.length > 0 ? [...prev, ...fresh] : prev;
         });
@@ -579,6 +592,18 @@ export function ChatView({
             return next;
           }
         }
+        // Dedup against the recent tail: if the same (role, content_type,
+        // text) just landed via the initial /messages fetch or a prior WS
+        // event, don't append again. Scan a short window so identical
+        // messages from different turns aren't collapsed.
+        const tail = prev.slice(-30);
+        const dup = tail.some(
+          (m) =>
+            m.role === event.role &&
+            m.content_type === event.content_type &&
+            m.text === event.text,
+        );
+        if (dup) return prev;
         return [
           ...prev,
           attachKey({
