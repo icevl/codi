@@ -1,4 +1,5 @@
 import {
+  CSSProperties,
   Dispatch,
   SetStateAction,
   useCallback,
@@ -7,6 +8,12 @@ import {
   useRef,
   useState,
 } from "react";
+import {
+  Group as PanelGroup,
+  Panel,
+  Separator as PanelResizeHandle,
+  useDefaultLayout,
+} from "react-resizable-panels";
 import { api, SessionSummary, WsEvent } from "./api";
 import { EventStream } from "./ws";
 import { Login } from "./components/Login";
@@ -23,6 +30,80 @@ import { Toast } from "./components/Toast";
 
 type AuthState = "loading" | "anon" | "authed";
 
+// Per-topic open-state for the side panels lives in localStorage so
+// reopening the app restores which panels each session had visible. The
+// stored shape is sparse: `{ "<windowId>": { diff?, office?, term? } }`
+// with `false` values omitted, so the file stays small and adding new
+// panel kinds later doesn't require migrations.
+const PANEL_STATE_KEY = "codexbot-panel-state-v1";
+
+type PanelOpenMap = Record<
+  string,
+  Partial<Record<"diff" | "office" | "term", boolean>>
+>;
+
+function loadPanelOpenMap(): PanelOpenMap {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = window.localStorage.getItem(PANEL_STATE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object") return {};
+    return parsed as PanelOpenMap;
+  } catch {
+    return {};
+  }
+}
+
+function savePanelOpenMap(map: PanelOpenMap): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(PANEL_STATE_KEY, JSON.stringify(map));
+  } catch {
+    // quota / private mode — best-effort persistence.
+  }
+}
+
+function setFromMap(
+  map: PanelOpenMap,
+  kind: "diff" | "office" | "term",
+): Set<string> {
+  const s = new Set<string>();
+  for (const [wid, flags] of Object.entries(map)) {
+    if (flags?.[kind]) s.add(wid);
+  }
+  return s;
+}
+
+// react-resizable-panels v4 renders `[data-panel]` as `display: flex` with
+// the default `flex-direction: row`. That makes the lib's own inner
+// `flex-grow:1` wrapper grow only along the main axis (horizontal), so
+// the panel content (.chat-area / .diff-panel / …) collapses to its
+// natural height. Forcing column direction via inline style — external
+// CSS doesn't override the lib's own inline `display: flex`.
+const PANEL_COLUMN_STYLE: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  overflow: "hidden",
+};
+
+// 760px matches the @media break in styles.css that turns side panels
+// into fixed-overlay drawers. Above it the panels live inside a resizable
+// PanelGroup; at-or-below it we render them as overlays instead.
+function useIsNarrow(): boolean {
+  const [narrow, setNarrow] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return window.matchMedia("(max-width: 760px)").matches;
+  });
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 760px)");
+    const handler = (e: MediaQueryListEvent) => setNarrow(e.matches);
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, []);
+  return narrow;
+}
+
 // Window-id-as-URL routing: paths like `/t/<window_id>` activate that
 // session on direct load and survive browser back/forward navigation.
 function readWindowIdFromUrl(): string | null {
@@ -36,6 +117,7 @@ function readWindowIdFromUrl(): string | null {
 }
 
 export function App() {
+  const isNarrow = useIsNarrow();
   const [auth, setAuth] = useState<AuthState>("loading");
   const [serverEnabled, setServerEnabled] = useState(true);
   const [totpRequired, setTotpRequired] = useState(false);
@@ -105,11 +187,31 @@ export function App() {
   // Panel open-state is per-topic so the Diff / Office / Terminal panel
   // a user has open on session A stays open when they switch to it
   // after browsing session B (where they may have had nothing open).
-  const [diffOpenIds, setDiffOpenIds] = useState<Set<string>>(() => new Set());
-  const [officeOpenIds, setOfficeOpenIds] = useState<Set<string>>(
-    () => new Set(),
+  // Hydrated from localStorage on first render so a reload preserves the
+  // exact panel layout the user left behind on each topic.
+  const [diffOpenIds, setDiffOpenIds] = useState<Set<string>>(() =>
+    setFromMap(loadPanelOpenMap(), "diff"),
   );
-  const [termOpenIds, setTermOpenIds] = useState<Set<string>>(() => new Set());
+  const [officeOpenIds, setOfficeOpenIds] = useState<Set<string>>(() =>
+    setFromMap(loadPanelOpenMap(), "office"),
+  );
+  const [termOpenIds, setTermOpenIds] = useState<Set<string>>(() =>
+    setFromMap(loadPanelOpenMap(), "term"),
+  );
+
+  // Persist whenever the open-state changes. Rebuilds the sparse map so
+  // sessions with no open panels are dropped entirely.
+  useEffect(() => {
+    const map: PanelOpenMap = {};
+    const remember = (wid: string, kind: "diff" | "office" | "term") => {
+      if (!map[wid]) map[wid] = {};
+      map[wid][kind] = true;
+    };
+    for (const wid of diffOpenIds) remember(wid, "diff");
+    for (const wid of officeOpenIds) remember(wid, "office");
+    for (const wid of termOpenIds) remember(wid, "term");
+    savePanelOpenMap(map);
+  }, [diffOpenIds, officeOpenIds, termOpenIds]);
   const [toast, setToast] = useState<{ kind: "info" | "error"; text: string } | null>(
     null,
   );
@@ -279,8 +381,11 @@ export function App() {
   // Prune panel-open entries for sessions that no longer exist so a
   // window_id that gets reused (very rare with tmux, but possible after
   // a server restart) doesn't auto-open panels that belonged to the
-  // previous tenant.
+  // previous tenant. Gated on `sessionsLoaded` so the initial empty
+  // sessions list (before the first /api/sessions response lands)
+  // doesn't wipe the per-topic state we just hydrated from localStorage.
   useEffect(() => {
+    if (!sessionsLoaded) return;
     const alive = new Set(sessions.map((s) => s.window_id));
     const prune = (s: Set<string>) => {
       let changed = false;
@@ -294,11 +399,33 @@ export function App() {
     setDiffOpenIds((prev) => prune(prev));
     setOfficeOpenIds((prev) => prune(prev));
     setTermOpenIds((prev) => prune(prev));
-  }, [sessions]);
+  }, [sessions, sessionsLoaded]);
 
   const diffOpen = !!activeId && diffOpenIds.has(activeId);
   const officeOpen = !!activeId && officeOpenIds.has(activeId);
   const termOpen = !!activeId && termOpenIds.has(activeId);
+
+  // Panel ids currently inside the PanelGroup. The layout hook keys
+  // persisted sizes by this list, so different open-combinations remember
+  // their own widths.
+  const visiblePanelIds = useMemo(() => {
+    const ids = ["chat"];
+    if (diffOpen) ids.push("diff");
+    if (officeOpen) ids.push("office");
+    if (termOpen) ids.push("term");
+    return ids;
+  }, [diffOpen, officeOpen, termOpen]);
+
+  // Per-topic layout id so each session remembers the exact widths the
+  // user dragged for its own combination of panels. Falls back to a
+  // global key when no session is selected (PanelGroup isn't rendered
+  // in that case, but the hook still has to be called).
+  const layoutProps = useDefaultLayout({
+    id: `codexbot-panels:${activeId ?? "default"}`,
+    panelIds: visiblePanelIds,
+    storage:
+      typeof window !== "undefined" ? window.localStorage : undefined,
+  });
 
   const togglePanel = useCallback(
     (setter: Dispatch<SetStateAction<Set<string>>>) => {
@@ -440,12 +567,70 @@ export function App() {
     );
   }
 
+  // The active session block is the same content on mobile and desktop;
+  // only the wrapping layout differs. Pulling it out keeps both branches
+  // small and avoids duplicating ~30 lines of prop wiring.
+  const chatNode = activeSession ? (
+    <ChatView
+      session={activeSession}
+      subscribeWs={subscribeWs}
+      onRequestScreenshot={() => setScreenshotFor(activeSession.window_id)}
+      onRequestKill={() => setKillTarget(activeSession)}
+      onOpenSidebar={() => setSidebarOpen(true)}
+      onToggleDiff={() => togglePanel(setDiffOpenIds)}
+      diffOpen={diffOpen}
+      onToggleOffice={() => togglePanel(setOfficeOpenIds)}
+      officeOpen={officeOpen}
+      onToggleTerm={() => togglePanel(setTermOpenIds)}
+      termOpen={termOpen}
+      onRename={async (name) => {
+        try {
+          await api.renameSession(activeSession.window_id, name);
+          await refreshSessions();
+          showToast("Renamed");
+        } catch (err) {
+          showToast((err as Error).message, "error");
+        }
+      }}
+      showToast={showToast}
+    />
+  ) : null;
+
+  const diffNode = activeSession ? (
+    <DiffPanel
+      windowId={activeSession.window_id}
+      open={diffOpen}
+      onClose={() => closePanel(setDiffOpenIds)}
+      subscribeWs={subscribeWs}
+    />
+  ) : null;
+
+  const officeNode = activeSession ? (
+    <OfficePanel
+      windowId={activeSession.window_id}
+      sessionName={activeSession.name}
+      busy={busyIds.has(activeSession.window_id)}
+      open={officeOpen}
+      onClose={() => closePanel(setOfficeOpenIds)}
+      subscribeWs={subscribeWs}
+      showToast={showToast}
+    />
+  ) : null;
+
+  const termNode = activeSession ? (
+    <TerminalPanel
+      windowId={activeSession.window_id}
+      open={termOpen}
+      onClose={() => closePanel(setTermOpenIds)}
+    />
+  ) : null;
+
   return (
     <div
       className={`app-shell${sidebarOpen ? " sidebar-open" : ""}${
-        diffOpen && activeSession ? " diff-open" : ""
-      }${officeOpen && activeSession ? " office-open" : ""}${
-        termOpen && activeSession ? " term-open" : ""
+        isNarrow && diffOpen && activeSession ? " diff-open" : ""
+      }${isNarrow && officeOpen && activeSession ? " office-open" : ""}${
+        isNarrow && termOpen && activeSession ? " term-open" : ""
       }`}
     >
       <Sidebar
@@ -471,51 +656,74 @@ export function App() {
         aria-hidden="true"
       />
       {activeSession ? (
-        <>
-          <ChatView
-            session={activeSession}
-            subscribeWs={subscribeWs}
-            onRequestScreenshot={() => setScreenshotFor(activeSession.window_id)}
-            onRequestKill={() => setKillTarget(activeSession)}
-            onOpenSidebar={() => setSidebarOpen(true)}
-            onToggleDiff={() => togglePanel(setDiffOpenIds)}
-            diffOpen={diffOpen}
-            onToggleOffice={() => togglePanel(setOfficeOpenIds)}
-            officeOpen={officeOpen}
-            onToggleTerm={() => togglePanel(setTermOpenIds)}
-            termOpen={termOpen}
-            onRename={async (name) => {
-              try {
-                await api.renameSession(activeSession.window_id, name);
-                await refreshSessions();
-                showToast("Renamed");
-              } catch (err) {
-                showToast((err as Error).message, "error");
-              }
-            }}
-            showToast={showToast}
-          />
-          <DiffPanel
-            windowId={activeSession.window_id}
-            open={diffOpen}
-            onClose={() => closePanel(setDiffOpenIds)}
-            subscribeWs={subscribeWs}
-          />
-          <OfficePanel
-            windowId={activeSession.window_id}
-            sessionName={activeSession.name}
-            busy={busyIds.has(activeSession.window_id)}
-            open={officeOpen}
-            onClose={() => closePanel(setOfficeOpenIds)}
-            subscribeWs={subscribeWs}
-            showToast={showToast}
-          />
-          <TerminalPanel
-            windowId={activeSession.window_id}
-            open={termOpen}
-            onClose={() => closePanel(setTermOpenIds)}
-          />
-        </>
+        isNarrow ? (
+          // Mobile: panels are fixed full-screen overlays driven by CSS
+          // (.app-shell.*-open). The wrapping layout is irrelevant.
+          <>
+            {chatNode}
+            {diffNode}
+            {officeNode}
+            {termNode}
+          </>
+        ) : (
+          // Desktop: chat + open side panels share a horizontal
+          // PanelGroup with draggable resize handles. Sizes persist via
+          // localStorage (autoSaveId). Closed panels and their preceding
+          // handles are simply not rendered.
+          <PanelGroup
+            orientation="horizontal"
+            className="panel-group"
+            {...layoutProps}
+          >
+            <Panel
+              id="chat"
+              minSize={25}
+              defaultSize={50}
+              style={PANEL_COLUMN_STYLE}
+            >
+              {chatNode}
+            </Panel>
+            {diffOpen && (
+              <>
+                <PanelResizeHandle className="panel-resize-handle" />
+                <Panel
+                  id="diff"
+                  minSize={12}
+                  defaultSize={22}
+                  style={PANEL_COLUMN_STYLE}
+                >
+                  {diffNode}
+                </Panel>
+              </>
+            )}
+            {officeOpen && (
+              <>
+                <PanelResizeHandle className="panel-resize-handle" />
+                <Panel
+                  id="office"
+                  minSize={14}
+                  defaultSize={26}
+                  style={PANEL_COLUMN_STYLE}
+                >
+                  {officeNode}
+                </Panel>
+              </>
+            )}
+            {termOpen && (
+              <>
+                <PanelResizeHandle className="panel-resize-handle" />
+                <Panel
+                  id="term"
+                  minSize={15}
+                  defaultSize={28}
+                  style={PANEL_COLUMN_STYLE}
+                >
+                  {termNode}
+                </Panel>
+              </>
+            )}
+          </PanelGroup>
+        )
       ) : (
         <main className="chat-area">
           <div className="chat-header">

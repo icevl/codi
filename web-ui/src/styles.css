@@ -235,45 +235,66 @@ a {
 
 /* App shell */
 .app-shell {
-  display: grid;
-  /* Reserve columns for the side panels — width 0 when closed — so their
-     elements don't wrap to a new grid row. */
-  grid-template-columns: 280px 1fr 0 0 0;
+  /* Desktop: sidebar 280px (fixed) + PanelGroup (chat + open side
+     panels with draggable splits). Mobile media query below switches
+     side panels back to fixed-overlay drawers. */
+  display: flex;
+  flex-direction: row;
   height: 100%;
   width: 100%;
-  transition: grid-template-columns 0.18s ease;
 }
 
-.app-shell.diff-open {
-  grid-template-columns: 280px 1fr min(440px, 38vw) 0 0;
+.panel-group {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
 }
 
-.app-shell.office-open {
-  grid-template-columns: 280px 1fr 0 min(560px, 44vw) 0;
+/* Each Panel inside the group must explicitly fill its column height
+   and act as a flex column so its single child (the panel UI root)
+   stretches. Without `height: 100%` here the lib lets the Panel size
+   to content and the chat composer floats up under the header. */
+.panel-group [data-panel] {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
 }
 
-.app-shell.term-open {
-  grid-template-columns: 280px 1fr 0 0 min(560px, 44vw);
+.panel-group [data-panel] > * {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
 }
 
-.app-shell.diff-open.office-open {
-  grid-template-columns: 280px 1fr min(360px, 28vw) min(560px, 38vw) 0;
+/* Draggable column splitter between chat and side panels. */
+.panel-resize-handle {
+  flex: 0 0 6px;
+  position: relative;
+  background: transparent;
+  cursor: col-resize;
+  outline: none;
 }
 
-.app-shell.diff-open.term-open {
-  grid-template-columns: 280px 1fr min(360px, 28vw) 0 min(520px, 38vw);
+.panel-resize-handle::after {
+  content: "";
+  position: absolute;
+  inset: 0 2px;
+  background: var(--border);
+  border-radius: 1px;
+  transition: background 0.12s ease;
 }
 
-.app-shell.office-open.term-open {
-  grid-template-columns: 280px 1fr 0 min(360px, 28vw) min(520px, 38vw);
-}
-
-.app-shell.diff-open.office-open.term-open {
-  grid-template-columns:
-    280px 1fr min(280px, 22vw) min(320px, 24vw) min(420px, 30vw);
+.panel-resize-handle:hover::after,
+.panel-resize-handle:active::after,
+.panel-resize-handle:focus-visible::after {
+  background: var(--accent);
 }
 
 .sidebar {
+  width: 280px;
+  flex: 0 0 280px;
   background: var(--bg-1);
   border-right: 1px solid var(--border);
   display: flex;
@@ -553,18 +574,26 @@ button.burger {
 
 /* Chat area */
 .chat-area {
+  /* Flex: 1 covers both the desktop case (we're the child of a Panel
+     flex column, grow vertically) and the mobile-overlay case (direct
+     child of .app-shell flex row, grow horizontally to fill the
+     remaining width next to the slide-out sidebar). */
+  flex: 1;
   display: flex;
   flex-direction: column;
+  height: 100%;
   min-height: 0;
   min-width: 0; /* allow shrinking inside the grid column so wide <pre> scrolls */
   background: var(--bg-0);
+  overflow: hidden;
 }
 
 .chat-header {
   position: relative;
   z-index: 100;
-  padding: 10px 20px;
-  min-height: 60px;
+  flex: 0 0 60px;
+  height: 60px;
+  padding: 8px 20px;
   border-bottom: 1px solid var(--border);
   display: flex;
   align-items: center;
@@ -583,6 +612,7 @@ button.burger {
 .chat-title .name {
   font-weight: 600;
   font-size: 15px;
+  line-height: 1.2;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -605,6 +635,7 @@ button.burger {
 
 .chat-title .path {
   font-size: 12px;
+  line-height: 1.25;
   color: var(--text-2);
   font-family: var(--font-mono);
   white-space: nowrap;
@@ -1511,6 +1542,8 @@ button.burger {
 
 /* Diff panel — slides in from the right and takes its own grid column on desktop. */
 .diff-panel {
+  height: 100%;
+  width: 100%;
   background: var(--bg-1);
   border-left: 1px solid var(--border);
   display: flex;
@@ -1523,8 +1556,9 @@ button.burger {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 10px 12px;
-  min-height: 60px;
+  flex: 0 0 60px;
+  height: 60px;
+  padding: 8px 12px;
   border-bottom: 1px solid var(--border);
 }
 
@@ -1655,6 +1689,8 @@ button.burger {
 
 /* Terminal panel — xterm.js host driven over WebSocket. */
 .term-panel {
+  height: 100%;
+  width: 100%;
   background: var(--bg-1);
   border-left: 1px solid var(--border);
   display: flex;
@@ -1667,8 +1703,9 @@ button.burger {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 10px 12px;
-  min-height: 60px;
+  flex: 0 0 60px;
+  height: 60px;
+  padding: 8px 12px;
   border-bottom: 1px solid var(--border);
   background: var(--bg-1);
 }
@@ -1747,6 +1784,8 @@ button.burger {
 
 /* Office panel — sprite-based agent visualization, mirrors diff-panel layout. */
 .office-panel {
+  height: 100%;
+  width: 100%;
   background: var(--bg-1);
   border-left: 1px solid var(--border);
   display: flex;
@@ -1759,8 +1798,9 @@ button.burger {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 10px 12px;
-  min-height: 60px;
+  flex: 0 0 60px;
+  height: 60px;
+  padding: 8px 12px;
   border-bottom: 1px solid var(--border);
 }
 
