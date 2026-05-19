@@ -1720,6 +1720,10 @@ button.burger {
   color: var(--ok);
 }
 
+.term-status-reconnecting {
+  color: var(--warn);
+}
+
 .term-status-closed {
   color: var(--danger);
 }

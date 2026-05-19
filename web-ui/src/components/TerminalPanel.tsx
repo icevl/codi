@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { RefreshCw, Terminal as TerminalIcon, X } from "lucide-react";
+import { Terminal as TerminalIcon, X } from "lucide-react";
 import { Terminal as XTerm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
@@ -17,17 +17,26 @@ interface Props {
 const FONT_FAMILY =
   '"Roboto Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace';
 
+// Exponential backoff for auto-reconnect, capped so we don't keep
+// hammering when the backend is truly down. Manual reconnect resets it.
+const RECONNECT_DELAYS = [500, 1000, 2000, 4000, 8000, 15000];
+
 export function TerminalPanel({ windowId, open, onClose }: Props) {
   const [mode, setMode] = useState<TermMode>("attach");
-  const [status, setStatus] = useState<"connecting" | "open" | "closed">(
-    "connecting",
-  );
+  const [status, setStatus] = useState<
+    "connecting" | "open" | "reconnecting" | "closed"
+  >("connecting");
   const [reconnectKey, setReconnectKey] = useState(0);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  // Survives across the effect re-runs that auto-reconnect triggers,
+  // so consecutive failures grow the backoff instead of resetting.
+  const attemptsRef = useRef(0);
 
   useEffect(() => {
     if (!open || !containerRef.current) return;
     const host = containerRef.current;
+    let cancelled = false;
+    let reconnectTimer: number | null = null;
 
     const term = new XTerm({
       fontFamily: FONT_FAMILY,
@@ -70,7 +79,22 @@ export function TerminalPanel({ windowId, open, onClose }: Props) {
       }
     };
 
+    const scheduleReconnect = () => {
+      if (cancelled) return;
+      const attempt = attemptsRef.current;
+      attemptsRef.current = attempt + 1;
+      const delay =
+        RECONNECT_DELAYS[Math.min(attempt, RECONNECT_DELAYS.length - 1)];
+      setStatus("reconnecting");
+      reconnectTimer = window.setTimeout(() => {
+        if (cancelled) return;
+        // Bumping the key re-runs this effect with a fresh WS.
+        setReconnectKey((k) => k + 1);
+      }, delay);
+    };
+
     ws.onopen = () => {
+      attemptsRef.current = 0;
       setStatus("open");
       sendResize();
       term.focus();
@@ -79,16 +103,31 @@ export function TerminalPanel({ windowId, open, onClose }: Props) {
       if (typeof ev.data === "string") return;
       term.write(new Uint8Array(ev.data as ArrayBuffer));
     };
-    ws.onclose = () => {
-      setStatus("closed");
+    ws.onclose = (ev) => {
+      if (cancelled) return;
+      // 4401 = bad cookie, 4403 = bad origin, 4404 = window gone.
+      // Auto-reconnecting won't help any of these — wait for the user.
+      const fatal = ev.code === 4401 || ev.code === 4403 || ev.code === 4404;
+      if (fatal) {
+        setStatus("closed");
+        try {
+          term.write(
+            `\r\n\x1b[31m[disconnected: ${ev.code} ${ev.reason || ""}]\x1b[0m\r\n`,
+          );
+        } catch {
+          // term may already be disposed
+        }
+        return;
+      }
       try {
-        term.write("\r\n\x1b[33m[disconnected]\x1b[0m\r\n");
+        term.write("\r\n\x1b[33m[disconnected — reconnecting…]\x1b[0m\r\n");
       } catch {
         // term may already be disposed
       }
+      scheduleReconnect();
     };
     ws.onerror = () => {
-      setStatus("closed");
+      // onclose runs right after; let it handle reconnect/state.
     };
 
     // Keystrokes go as binary frames so the backend doesn't try to JSON-
@@ -115,6 +154,8 @@ export function TerminalPanel({ windowId, open, onClose }: Props) {
     ro.observe(host);
 
     return () => {
+      cancelled = true;
+      if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
       ro.disconnect();
       if (resizeTimer !== null) window.clearTimeout(resizeTimer);
       dataDisp.dispose();
@@ -130,6 +171,12 @@ export function TerminalPanel({ windowId, open, onClose }: Props) {
       }
     };
   }, [open, windowId, mode, reconnectKey]);
+
+  // Reset backoff whenever the user switches mode/window or opens the
+  // panel, so a fresh attempt starts from the shortest delay.
+  useEffect(() => {
+    attemptsRef.current = 0;
+  }, [open, windowId, mode]);
 
   return (
     <aside
@@ -160,17 +207,14 @@ export function TerminalPanel({ windowId, open, onClose }: Props) {
           </button>
         </div>
         <span className={`term-status term-status-${status}`}>
-          {status === "open" ? "live" : status === "connecting" ? "…" : "off"}
+          {status === "open"
+            ? "live"
+            : status === "connecting"
+            ? "…"
+            : status === "reconnecting"
+            ? "retry"
+            : "off"}
         </span>
-        <button
-          type="button"
-          className="icon-button"
-          onClick={() => setReconnectKey((k) => k + 1)}
-          aria-label="Reconnect terminal"
-          title="Reconnect"
-        >
-          <RefreshCw size={ICON} />
-        </button>
         <button
           type="button"
           className="icon-button"
