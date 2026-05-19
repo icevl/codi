@@ -1,30 +1,37 @@
 :root {
   color-scheme: dark;
-  /* GitHub Primer dark palette */
-  --bg-0: #0d1117;
-  --bg-1: #161b22;
-  --bg-2: #1c2128;
-  --bg-3: #21262d;
-  --bg-elevated: #21262d;
-  --border: #30363d;
-  --border-strong: #484f58;
-  --text-0: #e6edf3;
-  --text-1: #adbac7;
-  --text-2: #7d8590;
-  --accent: #2f81f7;
-  --accent-soft: rgba(56, 139, 253, 0.15);
-  --accent-strong: #1f6feb;
-  --danger: #f85149;
-  --warn: #d29922;
-  --ok: #3fb950;
-  --user: #58a6ff;
-  --assistant: #c9d1d9;
-  --tool: #d2a8ff;
-  --bubble-user: #18243a;
-  --bubble-assistant: #161b22;
-  --bubble-tool: #1d1730;
-  --code-bg: #010409;
-  --shadow: 0 8px 24px rgba(1, 4, 9, 0.6);
+  /* Violet-tinted near-black palette — soft aurora glows live in body::before. */
+  --bg-0: #0a0712;
+  --bg-1: #110f1d;
+  --bg-2: #181628;
+  --bg-3: #221f33;
+  --bg-elevated: #1c1a2c;
+  --border: rgba(255, 255, 255, 0.06);
+  --border-strong: rgba(255, 255, 255, 0.14);
+  --text-0: #f0ecff;
+  --text-1: #c6c0db;
+  --text-2: #8a839f;
+  --accent: #a78bfa;
+  --accent-soft: rgba(167, 139, 250, 0.16);
+  --accent-strong: #c4a8ff;
+  --accent-pink: #ec4899;
+  --accent-gradient: linear-gradient(135deg, #a78bfa 0%, #ec4899 100%);
+  --accent-gradient-soft: linear-gradient(
+    135deg,
+    rgba(167, 139, 250, 0.22) 0%,
+    rgba(236, 72, 153, 0.22) 100%
+  );
+  --danger: #ff6b8a;
+  --warn: #ffb454;
+  --ok: #4ed4a0;
+  --user: #c4a8ff;
+  --assistant: #c6c0db;
+  --tool: #d8b4fe;
+  --bubble-user: rgba(167, 139, 250, 0.16);
+  --bubble-assistant: rgba(255, 255, 255, 0.04);
+  --bubble-tool: rgba(216, 180, 254, 0.08);
+  --code-bg: #07050d;
+  --shadow: 0 12px 32px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.35);
 
   --font-sans: "Roboto", -apple-system, BlinkMacSystemFont, "Segoe UI",
     "Helvetica Neue", Arial, sans-serif;
@@ -60,8 +67,35 @@ body,
   color: var(--text-0);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   font-size: 15px;
   line-height: 1.5;
+}
+
+/* Aurora backdrop: two soft conic-ish glows at the top to give the dark
+   surface a hint of color, matching the modern AI-chat references. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    radial-gradient(
+      60% 40% at 15% -5%,
+      rgba(167, 139, 250, 0.18) 0%,
+      transparent 60%
+    ),
+    radial-gradient(
+      55% 40% at 90% 0%,
+      rgba(236, 72, 153, 0.12) 0%,
+      transparent 65%
+    );
+}
+
+#root {
+  position: relative;
+  z-index: 1;
 }
 
 button {
@@ -87,15 +121,30 @@ button:disabled {
 }
 
 button.primary {
-  background: var(--accent);
-  border-color: var(--accent);
+  background: var(--accent-gradient);
+  border-color: transparent;
   color: white;
-  font-weight: 500;
+  font-weight: 600;
+  border-radius: 999px;
+  padding: 7px 16px;
+  box-shadow: 0 6px 18px rgba(167, 139, 250, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.18);
+  transition: transform 0.12s ease, box-shadow 0.12s ease, filter 0.12s ease;
 }
 
 button.primary:hover:not(:disabled) {
-  background: var(--accent-strong);
-  border-color: var(--accent-strong);
+  filter: brightness(1.05);
+  box-shadow: 0 8px 22px rgba(167, 139, 250, 0.38),
+    inset 0 1px 0 rgba(255, 255, 255, 0.22);
+}
+
+button.primary:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+button.primary:disabled {
+  box-shadow: none;
+  filter: grayscale(0.4);
 }
 
 button.danger {
@@ -167,18 +216,26 @@ a {
   justify-content: center;
   height: 100%;
   background: radial-gradient(
-      ellipse at top,
-      rgba(106, 140, 255, 0.1) 0%,
+      ellipse at 20% 0%,
+      rgba(167, 139, 250, 0.18) 0%,
+      transparent 55%
+    ),
+    radial-gradient(
+      ellipse at 80% 100%,
+      rgba(236, 72, 153, 0.12) 0%,
       transparent 60%
     ),
     var(--bg-0);
 }
 
 .login-card {
+  position: relative;
   width: 360px;
-  background: var(--bg-1);
-  border: 1px solid var(--border);
-  border-radius: 12px;
+  background: rgba(20, 17, 32, 0.7);
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+  border: 1px solid var(--border-strong);
+  border-radius: 16px;
   padding: 32px;
   box-shadow: var(--shadow);
 }
@@ -242,7 +299,9 @@ a {
 }
 
 .sidebar {
-  background: var(--bg-1);
+  background: rgba(17, 15, 29, 0.7);
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
@@ -250,7 +309,7 @@ a {
 }
 
 .sidebar-header {
-  padding: 12px 16px;
+  padding: 14px 16px;
   min-height: 60px;
   border-bottom: 1px solid var(--border);
   display: flex;
@@ -305,20 +364,20 @@ button.burger {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  padding: 8px 12px;
-  background: transparent;
-  color: var(--text-1);
-  border: 1px solid var(--border);
-  border-radius: 6px;
+  padding: 8px 14px;
+  background: var(--accent-gradient-soft);
+  color: var(--text-0);
+  border: 1px solid rgba(167, 139, 250, 0.35);
+  border-radius: 999px;
   font-size: 13px;
+  font-weight: 500;
   cursor: pointer;
-  transition: background 0.12s, color 0.12s, border-color 0.12s;
+  transition: filter 0.12s ease, box-shadow 0.12s ease;
 }
 
 .sidebar-new:hover {
-  background: var(--bg-2);
-  color: var(--text-0);
-  border-color: var(--border-strong);
+  filter: brightness(1.15);
+  box-shadow: 0 6px 18px rgba(167, 139, 250, 0.22);
 }
 
 .session-list {
@@ -349,12 +408,12 @@ button.burger {
 }
 
 .session-item.active {
-  background: rgba(56, 139, 253, 0.14);
+  background: var(--accent-soft);
   border-left-color: var(--accent);
 }
 
 .session-item.active:hover {
-  background: rgba(56, 139, 253, 0.18);
+  background: rgba(167, 139, 250, 0.22);
 }
 
 .session-item.active .session-name {
@@ -363,7 +422,7 @@ button.burger {
 }
 
 .session-item.pinned {
-  background: rgba(106, 140, 255, 0.04);
+  background: rgba(167, 139, 250, 0.05);
 }
 
 .session-row {
@@ -401,7 +460,7 @@ button.burger {
   margin-right: 6px;
   border-radius: 50%;
   background: var(--ok);
-  box-shadow: 0 0 0 2px rgba(78, 201, 176, 0.18);
+  box-shadow: 0 0 0 2px rgba(78, 212, 160, 0.18);
 }
 
 @keyframes spin {
@@ -525,17 +584,20 @@ button.burger {
   flex-direction: column;
   min-height: 0;
   min-width: 0; /* allow shrinking inside the grid column so wide <pre> scrolls */
-  background: var(--bg-0);
+  background: transparent;
 }
 
 .chat-header {
-  padding: 8px 18px;
+  padding: 10px 20px;
   min-height: 60px;
   border-bottom: 1px solid var(--border);
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  background: rgba(10, 7, 18, 0.55);
+  backdrop-filter: blur(18px) saturate(140%);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
 }
 
 .chat-title {
@@ -635,7 +697,7 @@ button.burger {
 }
 
 .chat-menu-popover button.active {
-  background: rgba(130, 163, 255, 0.15);
+  background: var(--accent-soft);
   color: var(--accent);
 }
 
@@ -817,9 +879,16 @@ button.burger {
 }
 
 .message-line.user .message-avatar {
-  background: var(--bubble-user);
-  color: var(--text-0);
-  border-color: rgba(130, 163, 255, 0.35);
+  background: var(--accent-gradient);
+  color: white;
+  border-color: transparent;
+  box-shadow: 0 4px 10px rgba(167, 139, 250, 0.35);
+}
+
+.message-line.assistant .message-avatar {
+  background: linear-gradient(135deg, #2b1f44 0%, #3a2557 100%);
+  color: var(--accent-strong);
+  border-color: rgba(167, 139, 250, 0.25);
 }
 
 .bubble {
@@ -900,7 +969,8 @@ button.burger {
 .bubble.user {
   --tail-color: var(--bubble-user);
   background: var(--bubble-user);
-  border-color: rgba(130, 163, 255, 0.18);
+  border-color: rgba(167, 139, 250, 0.3);
+  color: var(--text-0);
 }
 
 .bubble.tool,
@@ -1116,16 +1186,42 @@ button.burger {
 .composer {
   /* Floating card: lives inside the chat column padding instead of
      spanning panel edge-to-edge. Matches modern chat UIs (ChatGPT /
-     Claude) where the input feels detached from the panel chrome. */
+     Claude) where the input feels detached from the panel chrome.
+     Position: relative so the gradient focus halo (::before) can sit
+     behind the card without breaking flow. */
+  position: relative;
   margin: 0 18px 14px;
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  background: var(--bg-1);
-  border-radius: 14px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+  padding: 12px 14px;
+  border: 1px solid var(--border-strong);
+  background: rgba(20, 17, 32, 0.78);
+  backdrop-filter: blur(16px) saturate(140%);
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
+  border-radius: 18px;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
   display: flex;
   flex-direction: column;
   gap: 8px;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+/* Soft gradient halo behind the composer on focus — sits below the card
+   so it reads as ambient glow rather than an outline. */
+.composer::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  padding: 1px;
+  background: var(--accent-gradient);
+  -webkit-mask: linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  opacity: 0;
+  transition: opacity 0.18s ease;
+  pointer-events: none;
 }
 
 .composer textarea {
@@ -1316,14 +1412,20 @@ button.burger {
 }
 
 .composer:focus-within {
-  border-color: var(--accent);
-  box-shadow: 0 4px 18px rgba(56, 139, 253, 0.15);
+  border-color: transparent;
+  box-shadow: 0 22px 60px rgba(167, 139, 250, 0.18),
+    0 0 0 1px rgba(167, 139, 250, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.composer:focus-within::before {
+  opacity: 1;
 }
 
 .composer.drag-over {
   outline: 2px dashed var(--accent);
   outline-offset: -4px;
-  background: rgba(106, 140, 255, 0.06);
+  background: rgba(167, 139, 250, 0.08);
 }
 
 .attachments-row {
@@ -1529,7 +1631,7 @@ button.burger {
 
 .status-pill.live {
   color: var(--ok);
-  border-color: rgba(78, 201, 176, 0.4);
+  border-color: rgba(78, 212, 160, 0.4);
 }
 
 .status-pill.dead {
@@ -1538,19 +1640,21 @@ button.burger {
 }
 
 ::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--border);
-  border-radius: 10px;
-  border: 2px solid var(--bg-0);
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--border-strong);
+  background: rgba(167, 139, 250, 0.35);
+  background-clip: padding-box;
 }
 
 /* Diff panel — slides in from the right and takes its own grid column on desktop. */
@@ -1644,7 +1748,7 @@ button.burger {
 
 .diff-line-hunk {
   color: var(--accent);
-  background: rgba(56, 139, 253, 0.08);
+  background: rgba(167, 139, 250, 0.1);
 }
 
 .diff-line-meta {
@@ -1935,7 +2039,7 @@ button.burger {
 
 .catalog-tile-wrap.active {
   border-color: var(--accent);
-  background: rgba(56, 139, 253, 0.18);
+  background: var(--accent-soft);
 }
 
 .catalog-tile-wrap.custom::after {
