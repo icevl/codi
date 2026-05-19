@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Dispatch,
+  SetStateAction,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { api, SessionSummary, WsEvent } from "./api";
 import { EventStream } from "./ws";
 import { Login } from "./components/Login";
@@ -94,9 +102,14 @@ export function App() {
   const [killTarget, setKillTarget] = useState<SessionSummary | null>(null);
   const [renameTarget, setRenameTarget] = useState<SessionSummary | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [diffOpen, setDiffOpen] = useState(false);
-  const [officeOpen, setOfficeOpen] = useState(false);
-  const [termOpen, setTermOpen] = useState(false);
+  // Panel open-state is per-topic so the Diff / Office / Terminal panel
+  // a user has open on session A stays open when they switch to it
+  // after browsing session B (where they may have had nothing open).
+  const [diffOpenIds, setDiffOpenIds] = useState<Set<string>>(() => new Set());
+  const [officeOpenIds, setOfficeOpenIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [termOpenIds, setTermOpenIds] = useState<Set<string>>(() => new Set());
   const [toast, setToast] = useState<{ kind: "info" | "error"; text: string } | null>(
     null,
   );
@@ -263,6 +276,56 @@ export function App() {
     [sessions, activeId],
   );
 
+  // Prune panel-open entries for sessions that no longer exist so a
+  // window_id that gets reused (very rare with tmux, but possible after
+  // a server restart) doesn't auto-open panels that belonged to the
+  // previous tenant.
+  useEffect(() => {
+    const alive = new Set(sessions.map((s) => s.window_id));
+    const prune = (s: Set<string>) => {
+      let changed = false;
+      const next = new Set<string>();
+      for (const id of s) {
+        if (alive.has(id)) next.add(id);
+        else changed = true;
+      }
+      return changed ? next : s;
+    };
+    setDiffOpenIds((prev) => prune(prev));
+    setOfficeOpenIds((prev) => prune(prev));
+    setTermOpenIds((prev) => prune(prev));
+  }, [sessions]);
+
+  const diffOpen = !!activeId && diffOpenIds.has(activeId);
+  const officeOpen = !!activeId && officeOpenIds.has(activeId);
+  const termOpen = !!activeId && termOpenIds.has(activeId);
+
+  const togglePanel = useCallback(
+    (setter: Dispatch<SetStateAction<Set<string>>>) => {
+      if (!activeId) return;
+      setter((prev) => {
+        const next = new Set(prev);
+        if (next.has(activeId)) next.delete(activeId);
+        else next.add(activeId);
+        return next;
+      });
+    },
+    [activeId],
+  );
+
+  const closePanel = useCallback(
+    (setter: Dispatch<SetStateAction<Set<string>>>) => {
+      if (!activeId) return;
+      setter((prev) => {
+        if (!prev.has(activeId)) return prev;
+        const next = new Set(prev);
+        next.delete(activeId);
+        return next;
+      });
+    },
+    [activeId],
+  );
+
   const handleLogout = useCallback(async () => {
     try {
       await api.logout();
@@ -415,11 +478,11 @@ export function App() {
             onRequestScreenshot={() => setScreenshotFor(activeSession.window_id)}
             onRequestKill={() => setKillTarget(activeSession)}
             onOpenSidebar={() => setSidebarOpen(true)}
-            onToggleDiff={() => setDiffOpen((v) => !v)}
+            onToggleDiff={() => togglePanel(setDiffOpenIds)}
             diffOpen={diffOpen}
-            onToggleOffice={() => setOfficeOpen((v) => !v)}
+            onToggleOffice={() => togglePanel(setOfficeOpenIds)}
             officeOpen={officeOpen}
-            onToggleTerm={() => setTermOpen((v) => !v)}
+            onToggleTerm={() => togglePanel(setTermOpenIds)}
             termOpen={termOpen}
             onRename={async (name) => {
               try {
@@ -435,7 +498,7 @@ export function App() {
           <DiffPanel
             windowId={activeSession.window_id}
             open={diffOpen}
-            onClose={() => setDiffOpen(false)}
+            onClose={() => closePanel(setDiffOpenIds)}
             subscribeWs={subscribeWs}
           />
           <OfficePanel
@@ -443,14 +506,14 @@ export function App() {
             sessionName={activeSession.name}
             busy={busyIds.has(activeSession.window_id)}
             open={officeOpen}
-            onClose={() => setOfficeOpen(false)}
+            onClose={() => closePanel(setOfficeOpenIds)}
             subscribeWs={subscribeWs}
             showToast={showToast}
           />
           <TerminalPanel
             windowId={activeSession.window_id}
             open={termOpen}
-            onClose={() => setTermOpen(false)}
+            onClose={() => closePanel(setTermOpenIds)}
           />
         </>
       ) : (

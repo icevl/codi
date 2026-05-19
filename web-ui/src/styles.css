@@ -1655,7 +1655,7 @@ button.burger {
 
 /* Terminal panel — xterm.js host driven over WebSocket. */
 .term-panel {
-  background: #0e0f12;
+  background: var(--bg-1);
   border-left: 1px solid var(--border);
   display: flex;
   flex-direction: column;
@@ -1731,16 +1731,18 @@ button.burger {
 .term-panel-body {
   flex: 1;
   min-height: 0;
-  padding: 6px 8px 8px;
+  /* Inset the terminal card from the panel chrome — gives the xterm
+     viewport breathing room on all four sides. */
+  margin: 10px 12px 18px;
+  background: #0e0f12;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 8px;
   overflow: hidden;
 }
 
 .term-panel-body .xterm {
   height: 100%;
-}
-
-.term-panel-body .xterm-viewport {
-  background-color: transparent !important;
 }
 
 /* Office panel — sprite-based agent visualization, mirrors diff-panel layout. */
