@@ -124,10 +124,14 @@ export const api = {
       `/api/sessions/${encodeURIComponent(windowId)}`,
       { method: "PATCH", json: { pinned } },
     ),
-  getMessages: (windowId: string, opts?: { before?: string; limit?: number }) => {
+  getMessages: (
+    windowId: string,
+    opts?: { before?: string; after?: string; limit?: number },
+  ) => {
     const params = new URLSearchParams();
     params.set("limit", String(opts?.limit ?? 500));
     if (opts?.before) params.set("before", opts.before);
+    if (opts?.after) params.set("after", opts.after);
     return request<{
       messages: SessionMessage[];
       session_id: string | null;

@@ -622,6 +622,7 @@ def create_app(
         window_id: str,
         limit: int = Query(500, ge=1, le=2000),
         before: str | None = Query(None),
+        after: str | None = Query(None),
         _user: str = Depends(require_auth),
     ) -> dict[str, Any]:
         all_messages, _count = await session_manager.get_recent_messages(window_id)
@@ -631,6 +632,10 @@ def create_app(
         if before is not None:
             all_messages = [
                 m for m in all_messages if (m.get("timestamp") or "") < before
+            ]
+        if after is not None:
+            all_messages = [
+                m for m in all_messages if (m.get("timestamp") or "") > after
             ]
 
         has_more = len(all_messages) > limit

@@ -13,11 +13,14 @@ import {
   Bot,
   Camera,
   ChevronDown,
+  Eraser,
   GitCommit,
   Keyboard,
   Menu,
+  MoreVertical,
   Paperclip,
   Pencil,
+  Trash2,
   User,
   Users,
   X,
@@ -193,6 +196,8 @@ export function ChatView({
 }: Props) {
   const [showSkills, setShowSkills] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const messagesRef = useRef<ChatMessage[]>([]);
+  messagesRef.current = messages;
   // false while /api/sessions/<wid>/messages is in flight for the
   // currently selected session. Without this we'd render "No messages
   // yet" briefly between selecting a session and the history landing.
@@ -209,6 +214,7 @@ export function ChatView({
   >([]);
   const [dragOver, setDragOver] = useState(false);
   const [keysMenuOpen, setKeysMenuOpen] = useState(false);
+  const [chatMenuOpen, setChatMenuOpen] = useState(false);
   const [gitBranch, setGitBranch] = useState<string | null>(null);
   const [gitIsRepo, setGitIsRepo] = useState(false);
   const [branchMenuOpen, setBranchMenuOpen] = useState(false);
@@ -261,6 +267,7 @@ export function ChatView({
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const keysMenuRef = useRef<HTMLDivElement | null>(null);
+  const chatMenuRef = useRef<HTMLDivElement | null>(null);
   const branchMenuRef = useRef<HTMLDivElement | null>(null);
   const sessionIdRef = useRef<string | null>(session.session_id);
   const windowIdRef = useRef(session.window_id);
@@ -465,6 +472,66 @@ export function ChatView({
     return () => io.disconnect();
   }, [hasMore, loadOlder]);
 
+  // Catch-up after backgrounding: when the page is restored, ask the
+  // server for any messages newer than the last one we have. Covers the
+  // gap when iOS Safari suspended the WebSocket (`ws.ts` force-closes &
+  // reconnects on visible, but events that arrived during the suspend
+  // are not replayed by the server).
+  useEffect(() => {
+    let inflight = false;
+    const catchUp = async () => {
+      if (document.visibilityState !== "visible") return;
+      if (inflight) return;
+      const wid = windowIdRef.current;
+      if (!wid) return;
+      let lastTs = "";
+      for (const m of messagesRef.current) {
+        if (m.timestamp && m.timestamp > lastTs) lastTs = m.timestamp;
+      }
+      inflight = true;
+      try {
+        const r = await api.getMessages(wid, {
+          after: lastTs || undefined,
+          limit: 500,
+        });
+        if (windowIdRef.current !== wid) return;
+        if (r.messages.length === 0) return;
+        setMessages((prev) => {
+          if (prev.length === 0) return r.messages.map(attachKey);
+          const seen = new Set<string>();
+          for (const m of prev) {
+            if (m.timestamp) {
+              seen.add(`${m.timestamp}|${m.role}|${m.content_type}|${m.text}`);
+            }
+          }
+          const fresh = r.messages
+            .filter(
+              (m) =>
+                !m.timestamp ||
+                !seen.has(`${m.timestamp}|${m.role}|${m.content_type}|${m.text}`),
+            )
+            .map(attachKey);
+          return fresh.length > 0 ? [...prev, ...fresh] : prev;
+        });
+      } catch {
+        // Network blip — leave state alone, next reconnect will retry.
+      } finally {
+        inflight = false;
+      }
+    };
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void catchUp();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("pageshow", onVisible);
+    window.addEventListener("focus", onVisible);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("pageshow", onVisible);
+      window.removeEventListener("focus", onVisible);
+    };
+  }, []);
+
   // Subscribe to live updates.
   useEffect(() => {
     const isCurrentSession = (
@@ -572,6 +639,23 @@ export function ChatView({
       document.removeEventListener("keydown", onKey);
     };
   }, [keysMenuOpen]);
+
+  useEffect(() => {
+    if (!chatMenuOpen) return;
+    const onDocClick = (e: MouseEvent) => {
+      const el = chatMenuRef.current;
+      if (el && !el.contains(e.target as Node)) setChatMenuOpen(false);
+    };
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (e.key === "Escape") setChatMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onDocClick);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDocClick);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [chatMenuOpen]);
 
   // Close branch popover on outside click or Escape, mirroring the keys menu.
   useEffect(() => {
@@ -909,50 +993,93 @@ export function ChatView({
           )}
           <div className="path">{session.cwd || "—"}</div>
         </div>
-        <div className="chat-actions">
-          {gitIsRepo && (
-            <button
-              className={`with-icon${diffOpen ? " active" : ""}`}
-              onClick={onToggleDiff}
-              aria-label="Toggle diff panel"
-              aria-pressed={diffOpen}
-              title="Uncommitted diff"
-            >
-              <GitCommit size={ICON} />
-              <span className="btn-label">Diff</span>
-            </button>
+        <div
+          className={`chat-menu${chatMenuOpen ? " open" : ""}`}
+          ref={chatMenuOpen ? chatMenuRef : undefined}
+        >
+          <button
+            type="button"
+            className="chat-menu-trigger"
+            aria-label="Session actions"
+            aria-expanded={chatMenuOpen}
+            title="Session actions"
+            onClick={() => setChatMenuOpen((v) => !v)}
+          >
+            <MoreVertical size={ICON} />
+          </button>
+          {chatMenuOpen && (
+            <div className="chat-menu-popover">
+              {gitIsRepo && (
+                <button
+                  type="button"
+                  className={diffOpen ? "active" : ""}
+                  onClick={() => {
+                    setChatMenuOpen(false);
+                    onToggleDiff();
+                  }}
+                >
+                  <GitCommit size={ICON} />
+                  <span>Diff</span>
+                </button>
+              )}
+              <button
+                type="button"
+                className={officeOpen ? "active" : ""}
+                onClick={() => {
+                  setChatMenuOpen(false);
+                  onToggleOffice();
+                }}
+              >
+                <Users size={ICON} />
+                <span>Office</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setChatMenuOpen(false);
+                  onRequestScreenshot();
+                }}
+              >
+                <Camera size={ICON} />
+                <span>Screenshot</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setChatMenuOpen(false);
+                  setEditingName(true);
+                }}
+              >
+                <Pencil size={ICON} />
+                <span>Rename</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setChatMenuOpen(false);
+                  void onCommand("/clear");
+                  setMessages([]);
+                  setHasMore(false);
+                  setStreaming(null);
+                  showToast("Cleared — /clear sent to agent");
+                }}
+              >
+                <Eraser size={ICON} />
+                <span>Clear history</span>
+              </button>
+              <button
+                type="button"
+                className="danger"
+                onClick={() => {
+                  setChatMenuOpen(false);
+                  onRequestKill();
+                }}
+              >
+                <Trash2 size={ICON} />
+                <span>Kill</span>
+              </button>
+            </div>
           )}
-          <button
-            className={`with-icon${officeOpen ? " active" : ""}`}
-            onClick={onToggleOffice}
-            aria-label="Toggle office visualization"
-            aria-pressed={officeOpen}
-            title="Office (agent visualization)"
-          >
-            <Users size={ICON} />
-            <span className="btn-label">Office</span>
-          </button>
-          <button
-            className="with-icon"
-            onClick={onRequestScreenshot}
-            aria-label="Screenshot"
-            title="Screenshot"
-          >
-            <Camera size={ICON} />
-            <span className="btn-label">Screenshot</span>
-          </button>
-          <button
-            className="with-icon"
-            onClick={() => setEditingName(true)}
-            aria-label="Rename"
-            title="Rename"
-          >
-            <Pencil size={ICON} />
-            <span className="btn-label">Rename</span>
-          </button>
-          <button className="danger" onClick={onRequestKill}>
-            Kill
-          </button>
         </div>
       </div>
 

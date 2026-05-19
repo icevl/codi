@@ -576,15 +576,75 @@ button.burger {
   text-overflow: ellipsis;
 }
 
-.chat-actions {
-  display: flex;
-  gap: 6px;
+.chat-menu {
+  position: relative;
   flex-shrink: 0;
 }
 
-.chat-actions button {
-  font-size: 13px;
-  padding: 5px 10px;
+.chat-menu-trigger {
+  background: transparent;
+  border: none;
+  color: var(--text-2);
+  padding: 6px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 0;
+}
+
+.chat-menu-trigger:hover,
+.chat-menu.open .chat-menu-trigger {
+  background: var(--bg-3);
+  color: var(--text-0);
+}
+
+.chat-menu-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 180px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  z-index: 50;
+}
+
+.chat-menu-popover button {
+  background: transparent;
+  border: none;
+  text-align: left;
+  padding: 8px 12px;
+  border-radius: 4px;
+  color: var(--text-0);
+  font-size: 14px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.chat-menu-popover button:hover {
+  background: var(--bg-3);
+}
+
+.chat-menu-popover button.active {
+  background: rgba(130, 163, 255, 0.15);
+  color: var(--accent);
+}
+
+.chat-menu-popover button.danger {
+  color: var(--danger);
+}
+
+.chat-menu-popover button.danger:hover {
+  background: rgba(255, 107, 107, 0.12);
 }
 
 .messages-wrapper {
@@ -2181,19 +2241,6 @@ button.burger {
 
   .chat-title .path {
     font-size: 11px;
-  }
-
-  .chat-actions {
-    gap: 4px;
-  }
-
-  .chat-actions button {
-    padding: 6px 8px;
-    font-size: 12px;
-  }
-
-  .chat-actions .btn-label {
-    display: none;
   }
 
   .messages {
