@@ -1128,6 +1128,67 @@ button.burger {
   color: var(--text-2);
 }
 
+.slash-hints {
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  bottom: calc(100% + 8px);
+  max-height: min(320px, 45vh);
+  overflow-y: auto;
+  background: #15131f;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.6), 0 2px 8px rgba(0, 0, 0, 0.4);
+  padding: 6px;
+  z-index: 220;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.slash-hints-label {
+  padding: 2px 6px 4px;
+  color: var(--text-2);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.slash-hint-item {
+  display: grid;
+  grid-template-columns: minmax(88px, auto) minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  width: 100%;
+  padding: 7px 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-1);
+  text-align: left;
+}
+
+.slash-hint-item:hover,
+.slash-hint-item.active {
+  background: var(--bg-3);
+  border-color: var(--border-strong);
+  color: var(--text-0);
+}
+
+.slash-hint-command {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+.slash-hint-description {
+  min-width: 0;
+  color: var(--text-2);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
 .keys-menu {
   position: relative;
   display: inline-flex;

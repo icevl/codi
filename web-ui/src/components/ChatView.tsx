@@ -6,6 +6,7 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -68,6 +69,43 @@ const BOT_COMMANDS: Record<string, string> = {
   "/start": "Welcome message",
 };
 
+type SlashCommandHint = {
+  command: string;
+  description: string;
+};
+
+const CODEX_SLASH_COMMANDS: SlashCommandHint[] = [
+  { command: "/clear", description: "Clear conversation history" },
+  { command: "/new", description: "Start a new conversation" },
+  { command: "/compact", description: "Compact conversation context" },
+  { command: "/status", description: "Show current agent status" },
+  { command: "/cost", description: "Show token and cost usage" },
+  { command: "/help", description: "Show Codex help" },
+  { command: "/memory", description: "Edit project memory instructions" },
+  { command: "/model", description: "Switch AI model" },
+  { command: "/plan", description: "Draft or update a plan" },
+  { command: "/skills", description: "List Codex skills" },
+];
+
+const CLAUDE_SLASH_COMMANDS: SlashCommandHint[] = [
+  { command: "/clear", description: "Clear conversation history" },
+  { command: "/compact", description: "Compact conversation context" },
+  { command: "/config", description: "Open Claude Code configuration" },
+  { command: "/cost", description: "Show token and cost usage" },
+  { command: "/doctor", description: "Check Claude Code installation" },
+  { command: "/help", description: "Show Claude Code help" },
+  { command: "/init", description: "Initialize project instructions" },
+  { command: "/login", description: "Sign in to Claude Code" },
+  { command: "/logout", description: "Sign out of Claude Code" },
+  { command: "/mcp", description: "Manage MCP servers" },
+  { command: "/memory", description: "Edit Claude memory files" },
+  { command: "/model", description: "Switch AI model" },
+  { command: "/permissions", description: "Review tool permissions" },
+  { command: "/resume", description: "Resume a previous conversation" },
+  { command: "/review", description: "Request code review" },
+  { command: "/status", description: "Show current agent status" },
+];
+
 function parseSlashCommand(text: string): string | null {
   const trimmed = text.trim();
   if (!trimmed.startsWith("/")) return null;
@@ -83,6 +121,11 @@ type HistoryCacheEntry = {
   oldestTimestamp: string | null;
   newestTimestamp: string | null;
   historyVersion: string | null;
+};
+type SlashTokenRange = {
+  start: number;
+  end: number;
+  query: string;
 };
 
 const HISTORY_CACHE_MAX_WINDOWS = 8;
@@ -142,6 +185,40 @@ function responseNewestTimestamp(
   messages: SessionMessage[] = response.messages,
 ): string | null {
   return response.newest_timestamp ?? latestTimestamp(messages);
+}
+
+function agentSlashCommandsForRuntime(runtime: string): SlashCommandHint[] {
+  return runtime === "claude" ? CLAUDE_SLASH_COMMANDS : CODEX_SLASH_COMMANDS;
+}
+
+function slashTokenRange(
+  value: string,
+  selectionStart: number | null | undefined,
+): SlashTokenRange | null {
+  const caret = Math.max(
+    0,
+    Math.min(selectionStart ?? value.length, value.length),
+  );
+  const beforeCaret = value.slice(0, caret);
+  const tokenStart = Math.max(
+    beforeCaret.lastIndexOf(" "),
+    beforeCaret.lastIndexOf("\n"),
+    beforeCaret.lastIndexOf("\t"),
+  ) + 1;
+  if (value.slice(0, tokenStart).trim().length > 0) return null;
+
+  const afterCaret = value.slice(caret);
+  const nextWhitespace = afterCaret.search(/\s/);
+  const tokenEnd =
+    nextWhitespace === -1 ? value.length : caret + nextWhitespace;
+  const token = value.slice(tokenStart, tokenEnd);
+  if (!token.startsWith("/")) return null;
+  if (token.includes("@")) return null;
+  return {
+    start: tokenStart,
+    end: tokenEnd,
+    query: token.slice(1).toLowerCase(),
+  };
 }
 
 
@@ -247,8 +324,6 @@ const KEY_BUTTONS: Array<{ label: string; key: string }> = [
   { label: "Ctrl+C", key: "C-c" },
 ];
 
-// Codex/Claude-side slash commands — forwarded verbatim to the pane.
-const AGENT_QUICK_COMMANDS = ["/clear", "/new", "/compact", "/status", "/help"];
 // Bot-side commands — handled locally by the web UI.
 const BOT_QUICK_COMMANDS = ["/screenshot", "/skillhelp", "/esc"];
 
@@ -276,6 +351,8 @@ export function ChatView({
   // yet" briefly between selecting a session and the history landing.
   const [historyLoaded, setHistoryLoaded] = useState(false);
   const [text, setText] = useState("");
+  const [slashRange, setSlashRange] = useState<SlashTokenRange | null>(null);
+  const [slashActiveIndex, setSlashActiveIndex] = useState(0);
   const [sending, setSending] = useState(false);
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState(session.name);
@@ -352,6 +429,66 @@ export function ChatView({
     hasMoreRef.current = hasMore;
   }, [hasMore]);
 
+  const agentSlashCommands = useMemo(
+    () => agentSlashCommandsForRuntime(session.runtime),
+    [session.runtime],
+  );
+  const slashHints = useMemo(() => {
+    if (!slashRange) return [];
+    const prefix = `/${slashRange.query}`;
+    return agentSlashCommands.filter((hint) =>
+      hint.command.toLowerCase().startsWith(prefix),
+    );
+  }, [agentSlashCommands, slashRange]);
+  const showSlashHints = slashRange !== null && slashHints.length > 0;
+
+  useEffect(() => {
+    setSlashActiveIndex((idx) =>
+      slashHints.length === 0 ? 0 : Math.min(idx, slashHints.length - 1),
+    );
+  }, [slashHints.length]);
+
+  const refreshSlashHints = useCallback(
+    (value: string, selectionStart: number | null | undefined) => {
+      const nextRange = slashTokenRange(value, selectionStart);
+      setSlashRange(nextRange);
+      setSlashActiveIndex(0);
+    },
+    [],
+  );
+
+  const closeSlashHints = useCallback(() => {
+    setSlashRange(null);
+    setSlashActiveIndex(0);
+  }, []);
+
+  const insertSlashHint = useCallback(
+    (hint: SlashCommandHint) => {
+      const currentText = textRef.current;
+      const el = textareaRef.current;
+      const currentRange =
+        slashRange ?? slashTokenRange(currentText, el?.selectionStart);
+      if (!currentRange) return;
+
+      const inserted = `${hint.command} `;
+      const nextText =
+        currentText.slice(0, currentRange.start) +
+        inserted +
+        currentText.slice(currentRange.end);
+      const nextCaret = currentRange.start + inserted.length;
+      textRef.current = nextText;
+      setText(nextText);
+      closeSlashHints();
+      requestAnimationFrame(() => {
+        const textarea = textareaRef.current;
+        if (!textarea) return;
+        textarea.focus();
+        textarea.setSelectionRange(nextCaret, nextCaret);
+      });
+    },
+    [closeSlashHints, slashRange],
+  );
+
   const storeHistoryCache = useCallback(
     (
       windowId: string,
@@ -400,6 +537,7 @@ export function ChatView({
     setNameDraft(session.name);
     setEditingName(false);
     setStreaming(null);
+    closeSlashHints();
     setAttachments((prev) => {
       for (const a of prev) URL.revokeObjectURL(a.previewUrl);
       return [];
@@ -415,7 +553,7 @@ export function ChatView({
       const pos = restored.length;
       el.setSelectionRange(pos, pos);
     });
-  }, [session.window_id, session.session_id, session.name]);
+  }, [closeSlashHints, session.window_id, session.session_id, session.name]);
 
   // Revoke any preview blobs we still hold when the chat view unmounts.
   useEffect(() => {
@@ -1000,6 +1138,7 @@ export function ChatView({
       const caption = payload.trimEnd();
       const hasAttachments = attachments.length > 0;
       if (!caption && !hasAttachments) return;
+      closeSlashHints();
 
       // Slash-commands run only when there are no attachments — otherwise the
       // user clearly meant to upload, not invoke a bot command.
@@ -1109,6 +1248,7 @@ export function ChatView({
       handleBotCommand,
       attachments,
       storeHistoryCache,
+      closeSlashHints,
     ],
   );
 
@@ -1135,6 +1275,31 @@ export function ChatView({
   );
 
   const onTextareaKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (showSlashHints) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setSlashActiveIndex((idx) => (idx + 1) % slashHints.length);
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setSlashActiveIndex(
+          (idx) => (idx - 1 + slashHints.length) % slashHints.length,
+        );
+        return;
+      }
+      if (e.key === "Enter" || e.key === "Tab") {
+        e.preventDefault();
+        insertSlashHint(slashHints[slashActiveIndex]);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        closeSlashHints();
+        return;
+      }
+    }
+
     if (e.key === "Enter" && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
       e.preventDefault();
       send(text);
@@ -1424,11 +1589,57 @@ export function ChatView({
             ))}
           </div>
         )}
+        {showSlashHints && (
+          <div
+            id="slash-command-hints"
+            className="slash-hints"
+            role="listbox"
+            aria-label={`${session.runtime === "claude" ? "Claude" : "Codex"} slash commands`}
+            onMouseDown={(e) => e.preventDefault()}
+          >
+            <div className="slash-hints-label">
+              {session.runtime === "claude" ? "Claude" : "Codex"} commands
+            </div>
+            {slashHints.map((hint, index) => (
+              <button
+                key={hint.command}
+                type="button"
+                role="option"
+                aria-selected={index === slashActiveIndex}
+                className={
+                  "slash-hint-item" +
+                  (index === slashActiveIndex ? " active" : "")
+                }
+                onMouseEnter={() => setSlashActiveIndex(index)}
+                onClick={() => insertSlashHint(hint)}
+              >
+                <span className="slash-hint-command">{hint.command}</span>
+                <span className="slash-hint-description">
+                  {hint.description}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
         <textarea
           ref={textareaRef}
           value={text}
           placeholder="Send a message — Enter to send, Shift+Enter for newline. Paste or drop images to attach."
-          onChange={(e) => setText(e.target.value)}
+          aria-controls={showSlashHints ? "slash-command-hints" : undefined}
+          aria-expanded={showSlashHints}
+          aria-autocomplete="list"
+          onChange={(e) => {
+            const next = e.target.value;
+            setText(next);
+            refreshSlashHints(next, e.target.selectionStart);
+          }}
+          onFocus={(e) =>
+            refreshSlashHints(e.currentTarget.value, e.currentTarget.selectionStart)
+          }
+          onSelect={(e) =>
+            refreshSlashHints(e.currentTarget.value, e.currentTarget.selectionStart)
+          }
+          onBlur={closeSlashHints}
           onKeyDown={onTextareaKeyDown}
           onPaste={onPaste}
         />
@@ -1540,16 +1751,16 @@ export function ChatView({
                   <div className="keys-menu-section">
                     <div className="keys-menu-label">Agent commands</div>
                     <div className="keys-menu-grid">
-                      {AGENT_QUICK_COMMANDS.map((cmd) => (
+                      {agentSlashCommands.map((hint) => (
                         <button
-                          key={cmd}
+                          key={hint.command}
                           onClick={() => {
-                            onCommand(cmd);
+                            onCommand(hint.command);
                             setKeysMenuOpen(false);
                           }}
-                          title="Agent command"
+                          title={hint.description}
                         >
-                          {cmd}
+                          {hint.command}
                         </button>
                       ))}
                     </div>
