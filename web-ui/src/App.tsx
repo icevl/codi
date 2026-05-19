@@ -430,6 +430,7 @@ export function App() {
             windowId={activeSession.window_id}
             open={diffOpen}
             onClose={() => setDiffOpen(false)}
+            subscribeWs={subscribeWs}
           />
           <OfficePanel
             windowId={activeSession.window_id}

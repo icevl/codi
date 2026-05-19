@@ -1,14 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { GitCommit, RefreshCw, X } from "lucide-react";
-import { api } from "../api";
+import { api, WsEvent } from "../api";
 
 const ICON = 16;
-const POLL_MS = 3000;
+// Safety-net poll for changes the WS stream can't see (e.g. user editing
+// files outside the agent). Refetches are normally driven by chat events.
+const SAFETY_POLL_MS = 60000;
+// Coalesce bursts of agent events (a turn often emits many tool_results).
+const COALESCE_MS = 800;
 
 interface Props {
   windowId: string;
   open: boolean;
   onClose: () => void;
+  subscribeWs?: (listener: (e: WsEvent) => void) => () => void;
 }
 
 interface DiffState {
@@ -29,7 +34,7 @@ const EMPTY: DiffState = {
   untracked: [],
 };
 
-export function DiffPanel({ windowId, open, onClose }: Props) {
+export function DiffPanel({ windowId, open, onClose, subscribeWs }: Props) {
   const [state, setState] = useState<DiffState>(EMPTY);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -53,6 +58,8 @@ export function DiffPanel({ windowId, open, onClose }: Props) {
     }
   }, [windowId]);
 
+  // Initial fetch when panel opens, plus a slow safety-net poll that
+  // catches changes outside the agent (manual file edits, git ops).
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
@@ -61,12 +68,37 @@ export function DiffPanel({ windowId, open, onClose }: Props) {
       await fetchDiff();
     };
     tick();
-    const t = setInterval(tick, POLL_MS);
+    const t = setInterval(tick, SAFETY_POLL_MS);
     return () => {
       cancelled = true;
       clearInterval(t);
     };
   }, [open, fetchDiff]);
+
+  // Event-driven refresh: agent activity in the current window is the
+  // only reliable signal that the working tree might have changed.
+  // Coalesce bursts so a tool-heavy turn fires one request, not ten.
+  useEffect(() => {
+    if (!open || !subscribeWs) return;
+    let pending: number | null = null;
+    const schedule = () => {
+      if (pending !== null) return;
+      pending = window.setTimeout(() => {
+        pending = null;
+        fetchDiff();
+      }, COALESCE_MS);
+    };
+    const unsub = subscribeWs((event) => {
+      if (!("window_id" in event) || event.window_id !== windowId) return;
+      if (event.type === "message" || event.type === "completion") {
+        schedule();
+      }
+    });
+    return () => {
+      unsub();
+      if (pending !== null) window.clearTimeout(pending);
+    };
+  }, [open, subscribeWs, windowId, fetchDiff]);
 
   // Reset cached state and ETag when switching to a different window so we
   // don't briefly flash the previous repo's diff (or send a stale ETag the
