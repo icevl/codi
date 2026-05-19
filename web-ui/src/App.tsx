@@ -6,6 +6,7 @@ import { Sidebar } from "./components/Sidebar";
 import { ChatView } from "./components/ChatView";
 import { DiffPanel } from "./components/DiffPanel";
 import { OfficePanel } from "./components/OfficePanel";
+import { TerminalPanel } from "./components/TerminalPanel";
 import { NewSessionDialog } from "./components/NewSessionDialog";
 import { ScreenshotModal } from "./components/ScreenshotModal";
 import { ConfirmDialog } from "./components/ConfirmDialog";
@@ -95,6 +96,7 @@ export function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [diffOpen, setDiffOpen] = useState(false);
   const [officeOpen, setOfficeOpen] = useState(false);
+  const [termOpen, setTermOpen] = useState(false);
   const [toast, setToast] = useState<{ kind: "info" | "error"; text: string } | null>(
     null,
   );
@@ -379,7 +381,9 @@ export function App() {
     <div
       className={`app-shell${sidebarOpen ? " sidebar-open" : ""}${
         diffOpen && activeSession ? " diff-open" : ""
-      }${officeOpen && activeSession ? " office-open" : ""}`}
+      }${officeOpen && activeSession ? " office-open" : ""}${
+        termOpen && activeSession ? " term-open" : ""
+      }`}
     >
       <Sidebar
         sessions={sessions}
@@ -415,6 +419,8 @@ export function App() {
             diffOpen={diffOpen}
             onToggleOffice={() => setOfficeOpen((v) => !v)}
             officeOpen={officeOpen}
+            onToggleTerm={() => setTermOpen((v) => !v)}
+            termOpen={termOpen}
             onRename={async (name) => {
               try {
                 await api.renameSession(activeSession.window_id, name);
@@ -440,6 +446,11 @@ export function App() {
             onClose={() => setOfficeOpen(false)}
             subscribeWs={subscribeWs}
             showToast={showToast}
+          />
+          <TerminalPanel
+            windowId={activeSession.window_id}
+            open={termOpen}
+            onClose={() => setTermOpen(false)}
           />
         </>
       ) : (

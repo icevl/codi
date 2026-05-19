@@ -1095,6 +1095,218 @@ def create_app(
         }
 
     # -------------------------------------------------------------------
+    # WebSocket: per-session terminal
+    # -------------------------------------------------------------------
+
+    @app.websocket("/api/sessions/{window_id}/term")
+    async def terminal_socket(
+        websocket: WebSocket, window_id: str, mode: str = Query("attach")
+    ) -> None:
+        # Same origin + cookie checks as the event stream.
+        origin = websocket.headers.get("origin")
+        host = websocket.headers.get("host", "")
+        if not auth.origin_allowed(origin, request_host=host):
+            await websocket.close(code=4403)
+            return
+        cookie = websocket.cookies.get(COOKIE_NAME)
+        if not auth.verify_cookie(cookie):
+            await websocket.close(code=4401)
+            return
+        if mode not in ("attach", "shell"):
+            mode = "attach"
+        window = await tmux_manager.find_window_by_id(window_id)
+        if window is None:
+            await websocket.close(code=4404)
+            return
+
+        await websocket.accept()
+
+        # Build the child command. For "attach", create a per-client tmux
+        # session grouped with the bot's session and target the requested
+        # window — grouped sessions share the window set but maintain their
+        # own active window pointer, so multiple web clients viewing
+        # different topics don't fight over the bot's tmux clients.
+        if mode == "attach":
+            view_name = f"web-{window_id.lstrip('@')}-{secrets.token_hex(3)}"
+            tmux_session = tmux_manager.session_name
+            # Chain tmux commands via its own argv-level ';' separator —
+            # safer than shell interpolation, regardless of session name.
+            cmd = [
+                "tmux",
+                "new-session",
+                "-d",
+                "-s",
+                view_name,
+                "-t",
+                tmux_session,
+                ";",
+                "select-window",
+                "-t",
+                f"{view_name}:{window_id}",
+                ";",
+                "attach-session",
+                "-t",
+                view_name,
+            ]
+            cleanup_session = view_name
+        else:
+            user_shell = os.environ.get("SHELL", "/bin/bash")
+            cmd = [user_shell, "-i"]
+            cleanup_session = None
+
+        cwd = window.cwd or os.path.expanduser("~")
+
+        # Spawn PTY child.
+        import fcntl
+        import pty
+        import signal
+        import struct
+        import subprocess
+        import termios
+
+        pid, master_fd = pty.fork()
+        if pid == 0:
+            try:
+                if cwd and os.path.isdir(cwd):
+                    os.chdir(cwd)
+                os.environ["TERM"] = "xterm-256color"
+                os.execvp(cmd[0], cmd)
+            except Exception:
+                os._exit(1)
+
+        # Non-blocking master fd.
+        fl = fcntl.fcntl(master_fd, fcntl.F_GETFL)
+        fcntl.fcntl(master_fd, fcntl.F_SETFL, fl | os.O_NONBLOCK)
+
+        loop = asyncio.get_running_loop()
+        out_queue: asyncio.Queue[bytes] = asyncio.Queue(maxsize=256)
+
+        def _on_pty_readable() -> None:
+            try:
+                data = os.read(master_fd, 8192)
+            except (BlockingIOError, InterruptedError):
+                return
+            except OSError:
+                try:
+                    out_queue.put_nowait(b"")
+                except asyncio.QueueFull:
+                    pass
+                return
+            if not data:
+                try:
+                    out_queue.put_nowait(b"")
+                except asyncio.QueueFull:
+                    pass
+                return
+            try:
+                out_queue.put_nowait(data)
+            except asyncio.QueueFull:
+                # Drop oldest if the websocket is slow — terminals can
+                # always recover from a missed chunk on the next redraw.
+                try:
+                    out_queue.get_nowait()
+                    out_queue.put_nowait(data)
+                except Exception:
+                    pass
+
+        loop.add_reader(master_fd, _on_pty_readable)
+
+        async def pty_to_ws() -> None:
+            while True:
+                data = await out_queue.get()
+                if data == b"":
+                    return
+                try:
+                    await websocket.send_bytes(data)
+                except Exception:
+                    return
+
+        async def ws_to_pty() -> None:
+            while True:
+                try:
+                    msg = await websocket.receive()
+                except WebSocketDisconnect:
+                    return
+                if msg.get("type") == "websocket.disconnect":
+                    return
+                if msg.get("bytes") is not None:
+                    try:
+                        os.write(master_fd, msg["bytes"])
+                    except OSError:
+                        return
+                elif msg.get("text") is not None:
+                    text = msg["text"]
+                    ctrl: dict[str, Any] | None = None
+                    try:
+                        parsed = json.loads(text)
+                        if isinstance(parsed, dict) and "type" in parsed:
+                            ctrl = parsed
+                    except Exception:
+                        ctrl = None
+                    if ctrl is None:
+                        # Not a control frame — forward verbatim to the PTY.
+                        try:
+                            os.write(master_fd, text.encode("utf-8"))
+                        except OSError:
+                            return
+                        continue
+                    if ctrl.get("type") == "resize":
+                        try:
+                            rows = max(1, min(500, int(ctrl.get("rows", 24))))
+                            cols = max(1, min(500, int(ctrl.get("cols", 80))))
+                            fcntl.ioctl(
+                                master_fd,
+                                termios.TIOCSWINSZ,
+                                struct.pack("HHHH", rows, cols, 0, 0),
+                            )
+                        except Exception:
+                            pass
+
+        try:
+            done, pending = await asyncio.wait(
+                {
+                    asyncio.create_task(pty_to_ws()),
+                    asyncio.create_task(ws_to_pty()),
+                },
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            for task in pending:
+                task.cancel()
+        finally:
+            try:
+                loop.remove_reader(master_fd)
+            except Exception:
+                pass
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+            # Reap so we don't leave zombies.
+            try:
+                os.waitpid(pid, os.WNOHANG)
+            except ChildProcessError:
+                pass
+            try:
+                os.close(master_fd)
+            except OSError:
+                pass
+            if cleanup_session:
+                try:
+                    subprocess.run(
+                        ["tmux", "kill-session", "-t", cleanup_session],
+                        check=False,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        timeout=3,
+                    )
+                except Exception:
+                    pass
+            try:
+                await websocket.close()
+            except Exception:
+                pass
+
+    # -------------------------------------------------------------------
     # WebSocket event stream
     # -------------------------------------------------------------------
 

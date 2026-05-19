@@ -238,22 +238,39 @@ a {
   display: grid;
   /* Reserve columns for the side panels — width 0 when closed — so their
      elements don't wrap to a new grid row. */
-  grid-template-columns: 280px 1fr 0 0;
+  grid-template-columns: 280px 1fr 0 0 0;
   height: 100%;
   width: 100%;
   transition: grid-template-columns 0.18s ease;
 }
 
 .app-shell.diff-open {
-  grid-template-columns: 280px 1fr min(440px, 38vw) 0;
+  grid-template-columns: 280px 1fr min(440px, 38vw) 0 0;
 }
 
 .app-shell.office-open {
-  grid-template-columns: 280px 1fr 0 min(560px, 44vw);
+  grid-template-columns: 280px 1fr 0 min(560px, 44vw) 0;
+}
+
+.app-shell.term-open {
+  grid-template-columns: 280px 1fr 0 0 min(560px, 44vw);
 }
 
 .app-shell.diff-open.office-open {
-  grid-template-columns: 280px 1fr min(360px, 28vw) min(560px, 38vw);
+  grid-template-columns: 280px 1fr min(360px, 28vw) min(560px, 38vw) 0;
+}
+
+.app-shell.diff-open.term-open {
+  grid-template-columns: 280px 1fr min(360px, 28vw) 0 min(520px, 38vw);
+}
+
+.app-shell.office-open.term-open {
+  grid-template-columns: 280px 1fr 0 min(360px, 28vw) min(520px, 38vw);
+}
+
+.app-shell.diff-open.office-open.term-open {
+  grid-template-columns:
+    280px 1fr min(280px, 22vw) min(320px, 24vw) min(420px, 30vw);
 }
 
 .sidebar {
@@ -1636,6 +1653,92 @@ button.burger {
   }
 }
 
+/* Terminal panel — xterm.js host driven over WebSocket. */
+.term-panel {
+  background: #0e0f12;
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.term-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  min-height: 60px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-1);
+}
+
+.term-panel-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  color: var(--text-0);
+}
+
+.term-mode-toggle {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  margin-right: auto;
+}
+
+.term-mode-toggle button {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  color: var(--text-2);
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.term-mode-toggle button.active {
+  background: var(--bg-3);
+  color: var(--text-0);
+}
+
+.term-mode-toggle button + button {
+  border-left: 1px solid var(--border);
+}
+
+.term-status {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-2);
+  font-family: var(--font-mono);
+}
+
+.term-status-open {
+  color: var(--ok);
+}
+
+.term-status-closed {
+  color: var(--danger);
+}
+
+.term-panel-body {
+  flex: 1;
+  min-height: 0;
+  padding: 6px 8px 8px;
+  overflow: hidden;
+}
+
+.term-panel-body .xterm {
+  height: 100%;
+}
+
+.term-panel-body .xterm-viewport {
+  background-color: transparent !important;
+}
+
 /* Office panel — sprite-based agent visualization, mirrors diff-panel layout. */
 .office-panel {
   background: var(--bg-1);
@@ -2102,13 +2205,18 @@ button.burger {
 
   .app-shell.diff-open,
   .app-shell.office-open,
-  .app-shell.diff-open.office-open {
+  .app-shell.term-open,
+  .app-shell.diff-open.office-open,
+  .app-shell.diff-open.term-open,
+  .app-shell.office-open.term-open,
+  .app-shell.diff-open.office-open.term-open {
     /* Mobile: panels are fixed overlays, no grid column. */
     grid-template-columns: 1fr;
   }
 
   .diff-panel,
-  .office-panel {
+  .office-panel,
+  .term-panel {
     position: fixed;
     inset: 0;
     width: 100vw;
@@ -2120,7 +2228,8 @@ button.burger {
   }
 
   .app-shell.diff-open .diff-panel,
-  .app-shell.office-open .office-panel {
+  .app-shell.office-open .office-panel,
+  .app-shell.term-open .term-panel {
     transform: translateX(0);
   }
 

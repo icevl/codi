@@ -20,6 +20,7 @@ import {
   MoreVertical,
   Paperclip,
   Pencil,
+  Terminal as TerminalIcon,
   Trash2,
   User,
   Users,
@@ -42,6 +43,8 @@ interface Props {
   diffOpen: boolean;
   onToggleOffice: () => void;
   officeOpen: boolean;
+  onToggleTerm: () => void;
+  termOpen: boolean;
   onRename: (name: string) => Promise<void>;
   showToast: (text: string, kind?: "info" | "error") => void;
 }
@@ -191,6 +194,8 @@ export function ChatView({
   diffOpen,
   onToggleOffice,
   officeOpen,
+  onToggleTerm,
+  termOpen,
   onRename,
   showToast,
 }: Props) {
@@ -1057,6 +1062,17 @@ export function ChatView({
               >
                 <Users size={ICON} />
                 <span>Office</span>
+              </button>
+              <button
+                type="button"
+                className={termOpen ? "active" : ""}
+                onClick={() => {
+                  setChatMenuOpen(false);
+                  onToggleTerm();
+                }}
+              >
+                <TerminalIcon size={ICON} />
+                <span>Terminal</span>
               </button>
               <button
                 type="button"
