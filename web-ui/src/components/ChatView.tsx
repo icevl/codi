@@ -703,6 +703,7 @@ export function ChatView({
     }
   }, []);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const slashHintRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const keysMenuRef = useRef<HTMLDivElement | null>(null);
   const chatMenuRef = useRef<HTMLDivElement | null>(null);
@@ -783,6 +784,17 @@ export function ChatView({
       slashHints.length === 0 ? 0 : Math.min(idx, slashHints.length - 1),
     );
   }, [slashHints.length]);
+
+  // Keep the active hint visible when navigating with arrow keys. The
+  // hints container scrolls, but neither setSlashActiveIndex nor the
+  // browser scrolls the focused item into view on its own (the
+  // textarea retains keyboard focus the whole time).
+  useEffect(() => {
+    if (!showSlashHints) return;
+    slashHintRefs.current[slashActiveIndex]?.scrollIntoView({
+      block: "nearest",
+    });
+  }, [slashActiveIndex, showSlashHints]);
 
   useEffect(() => {
     if (choiceSendingKey && choiceSendingKey !== activeChoiceMessageKey) {
@@ -2008,6 +2020,9 @@ export function ChatView({
             {slashHints.map((hint, index) => (
               <button
                 key={hint.command}
+                ref={(el) => {
+                  slashHintRefs.current[index] = el;
+                }}
                 type="button"
                 role="option"
                 aria-selected={index === slashActiveIndex}
