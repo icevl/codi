@@ -42,7 +42,7 @@ Codi was developed on itself — iterating from a phone over Telegram while the 
 - Browser-based control panel at `http://127.0.0.1:8787` (configurable)
 - Live transcript stream over WebSocket — assistant text, tool calls, results, thinking blocks
 - Live terminal screenshots (ANSI-rendered PNG) for moments you want the raw pane
-- Send text, special keys (Esc, arrows, Tab, Ctrl+C…), slash commands (`/clear`, `/compact`, …)
+- Send text, special keys (Esc, arrows, Tab, Ctrl+C…), slash commands (`/clear`, `/compact`, …) — type `/` to open an autocomplete picker with the active agent's commands, navigable by arrow keys
 - Drag-and-drop / paste image attachments
 - Inline git branch indicator with a one-click branch switcher (`git switch`) for the pane's cwd
 - Skill catalog with quick-arm buttons

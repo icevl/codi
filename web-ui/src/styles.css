@@ -508,10 +508,10 @@ button.burger {
   top: calc(100% + 4px);
   right: 0;
   min-width: 140px;
-  background: #15131f;
-  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
   border-radius: 8px;
-  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.6), 0 2px 8px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
   padding: 4px;
   display: flex;
   flex-direction: column;
@@ -681,10 +681,10 @@ button.burger {
   top: calc(100% + 6px);
   right: 0;
   min-width: 180px;
-  background: #15131f;
-  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
   border-radius: 10px;
-  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.6), 0 2px 8px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
   padding: 4px;
   display: flex;
   flex-direction: column;
@@ -1212,15 +1212,14 @@ button.burger {
 
 .slash-hints {
   position: absolute;
-  left: 14px;
-  right: 14px;
+  left: 0;
+  right: 0;
   bottom: calc(100% + 8px);
   max-height: min(320px, 45vh);
   overflow-y: auto;
-  background: #15131f;
-  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
   border-radius: 8px;
-  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.6), 0 2px 8px rgba(0, 0, 0, 0.4);
   padding: 6px;
   z-index: 220;
   display: flex;
@@ -1260,7 +1259,7 @@ button.burger {
 .slash-hint-command {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 13px;
-  color: var(--accent);
+  color: var(--text-0);
   white-space: nowrap;
 }
 
@@ -1287,10 +1286,10 @@ button.burger {
   right: 0;
   min-width: 260px;
   max-width: min(360px, 92vw);
-  background: #15131f;
-  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
   border-radius: 10px;
-  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.6), 0 2px 8px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
   padding: 8px;
   display: flex;
   flex-direction: column;
@@ -1377,10 +1376,10 @@ button.burger {
   max-width: min(360px, 92vw);
   max-height: 260px;
   overflow-y: auto;
-  background: #15131f;
-  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
   border-radius: 10px;
-  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.6), 0 2px 8px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
   padding: 4px;
   display: flex;
   flex-direction: column;

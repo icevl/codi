@@ -82,28 +82,27 @@ export function UpdateBanner({ subscribeWs }: Props) {
     window.sessionStorage.setItem(PENDING_KEY, "1");
     setPhase("reloading");
     // The backend will SIGTERM itself any second now via launchctl.
-    // Wait for the *new* server to come up by polling /api/me, then
-    // reload so the new bundle is fetched. Keep trying forever — the
-    // service is managed by launchd and will come back, just maybe
-    // slowly on first build.
+    // Probe /api/update/status until current_sha differs from the one
+    // we captured before the update — that's the only reliable signal
+    // that the *new* process is up. Probing /api/me would succeed on
+    // the still-alive old process and trigger a premature reload onto
+    // the old bundle. Keep trying forever; launchd will bring the
+    // service back, just maybe slowly on first build.
+    const beforeSha = startSha.current;
     const probe = async () => {
       try {
-        const r = await fetch("/api/me", {
-          credentials: "include",
-          cache: "no-store",
-        });
-        if (r.ok) {
+        const status = await api.getUpdateStatus();
+        if (status.current_sha && status.current_sha !== beforeSha) {
           window.location.reload();
           return;
         }
       } catch {
-        // server still down; keep waiting
+        // server still restarting; keep waiting
       }
       window.setTimeout(probe, RECONNECT_PROBE_MS);
     };
     // Give launchd a moment to actually start the kill before we begin
-    // probing — otherwise the first probe may succeed on the doomed
-    // process and we'd reload too early.
+    // probing.
     window.setTimeout(probe, RECONNECT_PROBE_MS);
   };
 
@@ -119,17 +118,17 @@ export function UpdateBanner({ subscribeWs }: Props) {
       <div className="update-banner-body">
         {phase === "offered" && (
           <>
-            <strong>Доступно обновление</strong>
+            <strong>Update available</strong>
             {subject && <span className="update-banner-subject">{subject}</span>}
           </>
         )}
-        {phase === "starting" && <strong>Запускаю обновление…</strong>}
+        {phase === "starting" && <strong>Starting update…</strong>}
         {phase === "reloading" && (
-          <strong>Обновляюсь, страница перезагрузится…</strong>
+          <strong>Updating, the page will reload…</strong>
         )}
         {phase === "error" && (
           <>
-            <strong>Не получилось обновиться</strong>
+            <strong>Update failed</strong>
             {error && <span className="update-banner-subject">{error}</span>}
           </>
         )}
@@ -137,14 +136,14 @@ export function UpdateBanner({ subscribeWs }: Props) {
       {phase === "offered" && (
         <>
           <button type="button" className="primary" onClick={runUpdate}>
-            Обновить
+            Update
           </button>
           <button
             type="button"
             className="icon-button"
             onClick={() => setPhase("idle")}
-            aria-label="Позже"
-            title="Позже"
+            aria-label="Later"
+            title="Later"
           >
             <X size={ICON} />
           </button>
@@ -155,8 +154,8 @@ export function UpdateBanner({ subscribeWs }: Props) {
           type="button"
           className="icon-button"
           onClick={() => setPhase("idle")}
-          aria-label="Закрыть"
-          title="Закрыть"
+          aria-label="Close"
+          title="Close"
         >
           <X size={ICON} />
         </button>
