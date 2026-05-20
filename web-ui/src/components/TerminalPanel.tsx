@@ -20,9 +20,39 @@ const FONT_FAMILY =
 // Exponential backoff for auto-reconnect, capped so we don't keep
 // hammering when the backend is truly down. Manual reconnect resets it.
 const RECONNECT_DELAYS = [500, 1000, 2000, 4000, 8000, 15000];
+const TERM_MODE_STORAGE_PREFIX = "codexbot:terminal-mode:";
+
+function isTermMode(value: string | null): value is TermMode {
+  return value === "attach" || value === "shell";
+}
+
+function readStoredTermMode(windowId: string): TermMode {
+  try {
+    const value = localStorage.getItem(`${TERM_MODE_STORAGE_PREFIX}${windowId}`);
+    return isTermMode(value) ? value : "attach";
+  } catch {
+    return "attach";
+  }
+}
+
+function writeStoredTermMode(windowId: string, mode: TermMode): void {
+  try {
+    localStorage.setItem(`${TERM_MODE_STORAGE_PREFIX}${windowId}`, mode);
+  } catch {
+    // ignore storage errors
+  }
+}
 
 export function TerminalPanel({ windowId, open, onClose }: Props) {
-  const [mode, setMode] = useState<TermMode>("attach");
+  const [modeState, setModeState] = useState<{
+    windowId: string;
+    mode: TermMode;
+  }>(() => ({
+    windowId,
+    mode: readStoredTermMode(windowId),
+  }));
+  const mode =
+    modeState.windowId === windowId ? modeState.mode : readStoredTermMode(windowId);
   const [status, setStatus] = useState<
     "connecting" | "open" | "reconnecting" | "closed"
   >("connecting");
@@ -31,6 +61,16 @@ export function TerminalPanel({ windowId, open, onClose }: Props) {
   // Survives across the effect re-runs that auto-reconnect triggers,
   // so consecutive failures grow the backoff instead of resetting.
   const attemptsRef = useRef(0);
+
+  useEffect(() => {
+    if (modeState.windowId === windowId) return;
+    setModeState({ windowId, mode });
+  }, [mode, modeState.windowId, windowId]);
+
+  const setTerminalMode = (nextMode: TermMode) => {
+    writeStoredTermMode(windowId, nextMode);
+    setModeState({ windowId, mode: nextMode });
+  };
 
   useEffect(() => {
     if (!open || !containerRef.current) return;
@@ -192,7 +232,7 @@ export function TerminalPanel({ windowId, open, onClose }: Props) {
           <button
             type="button"
             className={mode === "attach" ? "active" : ""}
-            onClick={() => setMode("attach")}
+            onClick={() => setTerminalMode("attach")}
             title="Attach to the topic's tmux window"
           >
             Attach
@@ -200,8 +240,8 @@ export function TerminalPanel({ windowId, open, onClose }: Props) {
           <button
             type="button"
             className={mode === "shell" ? "active" : ""}
-            onClick={() => setMode("shell")}
-            title="Fresh shell in the session cwd"
+            onClick={() => setTerminalMode("shell")}
+            title="Persistent shell in the session cwd"
           >
             Shell
           </button>

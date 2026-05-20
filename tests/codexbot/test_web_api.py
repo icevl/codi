@@ -277,6 +277,98 @@ def test_send_key_accepts_whitelisted(
     assert captured == {"wid": "@5", "key": "Escape", "enter": False, "literal": False}
 
 
+def test_persistent_shell_session_name_is_stable_and_safe(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codexbot.web import api as web_api
+
+    monkeypatch.setattr(web_api.tmux_manager, "session_name", "codex:bot")
+
+    assert web_api._persistent_shell_session_name("@34") == "codex_bot-shell-34"
+
+
+@pytest.mark.asyncio
+async def test_ensure_persistent_shell_reuses_existing_session(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from codexbot.web import api as web_api
+
+    monkeypatch.setattr(web_api.tmux_manager, "session_name", "codexbot")
+    run_calls: list[list[str]] = []
+
+    async def fake_exists(session_name: str) -> bool:
+        assert session_name == "codexbot-shell-5"
+        return True
+
+    async def fake_run(args: list[str], *, timeout: float = 3.0) -> int:
+        run_calls.append(args)
+        return 0
+
+    monkeypatch.setattr(web_api, "_tmux_session_exists", fake_exists)
+    monkeypatch.setattr(web_api, "_run_tmux_command", fake_run)
+
+    session_name = await web_api._ensure_persistent_shell_session("@5", str(tmp_path))
+
+    assert session_name == "codexbot-shell-5"
+    assert run_calls == []
+
+
+@pytest.mark.asyncio
+async def test_ensure_persistent_shell_creates_session_in_window_cwd(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from codexbot.web import api as web_api
+
+    monkeypatch.setattr(web_api.tmux_manager, "session_name", "codexbot")
+    run_calls: list[tuple[list[str], float]] = []
+
+    async def fake_exists(_session_name: str) -> bool:
+        return False
+
+    async def fake_run(args: list[str], *, timeout: float = 3.0) -> int:
+        run_calls.append((args, timeout))
+        return 0
+
+    monkeypatch.setattr(web_api, "_tmux_session_exists", fake_exists)
+    monkeypatch.setattr(web_api, "_run_tmux_command", fake_run)
+
+    session_name = await web_api._ensure_persistent_shell_session("@5", str(tmp_path))
+
+    assert session_name == "codexbot-shell-5"
+    assert run_calls == [
+        (
+            [
+                "new-session",
+                "-d",
+                "-s",
+                "codexbot-shell-5",
+                "-c",
+                str(tmp_path),
+            ],
+            5.0,
+        )
+    ]
+
+
+def test_kill_session_cleans_persistent_shell(
+    authed_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from codexbot.web import api as web_api
+
+    async def fake_kill_window(window_id: str) -> bool:
+        assert window_id == "@5"
+        return True
+
+    shell_kill = AsyncMock(return_value=True)
+    monkeypatch.setattr(web_api.tmux_manager, "kill_window", fake_kill_window)
+    monkeypatch.setattr(web_api, "_kill_persistent_shell_session", shell_kill)
+
+    r = authed_client.delete("/api/sessions/@5")
+
+    assert r.status_code == 200, r.text
+    shell_kill.assert_awaited_once_with("@5")
+
+
 def test_command_endpoint_prepends_slash(
     authed_client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:

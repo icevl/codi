@@ -158,6 +158,72 @@ def _safe_image_ext(filename: str) -> str | None:
     return None
 
 
+def _safe_tmux_name_part(value: str) -> str:
+    cleaned = "".join(
+        ch if ch.isalnum() or ch in "._-" else "_" for ch in value.strip()
+    )
+    return cleaned.strip("._-") or "session"
+
+
+def _persistent_shell_session_name(window_id: str) -> str:
+    parent = _safe_tmux_name_part(tmux_manager.session_name)
+    wid = _safe_tmux_name_part(window_id.lstrip("@"))
+    return f"{parent}-shell-{wid}"
+
+
+async def _run_tmux_command(args: list[str], *, timeout: float = 3.0) -> int:
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "tmux",
+            *args,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+    except OSError:
+        return -1
+
+    try:
+        return await asyncio.wait_for(proc.wait(), timeout=timeout)
+    except asyncio.TimeoutError:
+        try:
+            proc.kill()
+        except ProcessLookupError:
+            pass
+        try:
+            await proc.wait()
+        except Exception:
+            pass
+        return -1
+
+
+async def _tmux_session_exists(session_name: str) -> bool:
+    return (
+        await _run_tmux_command(["has-session", "-t", session_name], timeout=2.0)
+    ) == 0
+
+
+async def _ensure_persistent_shell_session(window_id: str, cwd: str | None) -> str:
+    session_name = _persistent_shell_session_name(window_id)
+    if await _tmux_session_exists(session_name):
+        return session_name
+
+    start_dir = cwd if cwd and os.path.isdir(cwd) else os.path.expanduser("~")
+    rc = await _run_tmux_command(
+        ["new-session", "-d", "-s", session_name, "-c", start_dir],
+        timeout=5.0,
+    )
+    if rc != 0:
+        raise RuntimeError(f"failed to create persistent shell tmux session: {rc}")
+    return session_name
+
+
+async def _kill_persistent_shell_session(window_id: str) -> bool:
+    session_name = _persistent_shell_session_name(window_id)
+    return (
+        await _run_tmux_command(["kill-session", "-t", session_name], timeout=3.0)
+    ) == 0
+
+
 # Special key names whitelisted for /keys. The tmux send-keys protocol accepts
 # many tokens, but we restrict to a curated, safe set.
 ALLOWED_KEYS: set[str] = {
@@ -582,6 +648,7 @@ def create_app(
         ok = await tmux_manager.kill_window(window_id)
         if not ok:
             raise HTTPException(404, detail="window not found")
+        await _kill_persistent_shell_session(window_id)
         # Delete the matching Telegram topic before dropping local state,
         # otherwise iter_thread_bindings has already lost the mapping.
         await _delete_telegram_topic(bot, window_id)
@@ -1192,6 +1259,7 @@ def create_app(
         if window is None:
             await websocket.close(code=4404)
             return
+        cwd = window.cwd or os.path.expanduser("~")
 
         await websocket.accept()
 
@@ -1224,11 +1292,16 @@ def create_app(
             ]
             cleanup_session = view_name
         else:
-            user_shell = os.environ.get("SHELL", "/bin/bash")
-            cmd = [user_shell, "-i"]
+            try:
+                shell_session = await _ensure_persistent_shell_session(
+                    window_id, cwd
+                )
+            except RuntimeError as exc:
+                logger.error("Failed to prepare persistent shell: %s", exc)
+                await websocket.close(code=1011)
+                return
+            cmd = ["tmux", "attach-session", "-t", shell_session]
             cleanup_session = None
-
-        cwd = window.cwd or os.path.expanduser("~")
 
         # Spawn PTY child.
         import fcntl
