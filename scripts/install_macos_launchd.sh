@@ -78,6 +78,16 @@ cat > "${PLIST_PATH}" <<EOF
   <string>${LOG_DIR}/launchd.out.log</string>
   <key>StandardErrorPath</key>
   <string>${LOG_DIR}/launchd.err.log</string>
+
+  <!-- macOS default for launchd-spawned processes is maxfiles=256, which
+       is below what Claude Code / Codex CLI need (they open watchers per
+       file). Raise it so child agents don't fail with "low max file
+       descriptors" on launch. -->
+  <key>SoftResourceLimits</key>
+  <dict>
+    <key>NumberOfFiles</key>
+    <integer>65536</integer>
+  </dict>
 </dict>
 </plist>
 EOF

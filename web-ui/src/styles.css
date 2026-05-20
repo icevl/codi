@@ -59,10 +59,11 @@ body,
      "zooms" even with font-size: 16px. */
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
-  /* Clip any rogue horizontal overflow from grid/transform interactions
-     (e.g. the fixed diff-panel sitting at translateX(100%)) so the page
-     never exposes a horizontal scroll on mobile. */
-  overflow-x: hidden;
+  /* Clip overflow on both axes — the inner panels (messages list,
+     diff, term) own their own scroll, so the body itself must never
+     scroll. A leaky vertical overflow lets the page itself scroll
+     when the user tries to grab a resize handle, which is the bug. */
+  overflow: hidden;
   background: var(--bg-0);
   color: var(--text-0);
   font-family: var(--font-sans);
@@ -268,19 +269,27 @@ a {
   min-width: 0;
 }
 
-/* Draggable column splitter between chat and side panels. */
+/* Draggable column splitter between chat and side panels. The hit
+   target is intentionally wider than the visible line — 6px was easy
+   to miss, and a misclick on the adjacent panel let the browser
+   capture the gesture as a scroll before the lib's pointerdown could
+   fire. `touch-action: none` blocks the same hijack on touchscreens
+   (the library itself doesn't set it). */
 .panel-resize-handle {
-  flex: 0 0 6px;
+  flex: 0 0 12px;
   position: relative;
   background: transparent;
   cursor: col-resize;
   outline: none;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .panel-resize-handle::after {
   content: "";
   position: absolute;
-  inset: 0 2px;
+  inset: 0 5px;
   background: var(--border);
   border-radius: 1px;
   transition: background 0.12s ease;
@@ -1635,6 +1644,51 @@ button.burger {
   color: var(--danger);
 }
 
+/* Self-update banner — pinned bottom-center, slightly fancier than a
+   toast because it persists until acted on. */
+.update-banner {
+  position: fixed;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  color: var(--text-0);
+  z-index: 250;
+  max-width: min(720px, calc(100% - 32px));
+}
+
+.update-banner-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.update-banner-body strong {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.update-banner-subject {
+  font-size: 12px;
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 480px;
+}
+
+.update-banner-error .update-banner-subject {
+  color: var(--danger);
+}
+
 .status-pill {
   font-size: 11px;
   text-transform: uppercase;
@@ -1977,6 +2031,31 @@ button.burger {
   position: relative;
   width: 100%;
   margin: 0;
+}
+
+/* Codexbot's global `button` rule (top of this file) adds padding/border to
+   every button. Strip those inside tunio-player so the progress ring on the
+   play button isn't squashed by extra padding. */
+.tunio-player button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  transition: none;
+}
+
+/* Sidebar button-only player — match the neighbouring icon-button look. */
+.tunio-player .codi-sidebar-play {
+  background-color: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-0);
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+
+.tunio-player .codi-sidebar-play:hover {
+  background-color: var(--bg-3);
+  border-color: var(--border-strong);
 }
 
 .office-loader {

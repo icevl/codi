@@ -284,6 +284,19 @@ export const api = {
     const data = await res.json();
     return { status: 200, etag: newEtag, data };
   },
+
+  getUpdateStatus: () =>
+    request<{
+      enabled: boolean;
+      current_sha: string | null;
+      latest_sha: string | null;
+      has_update: boolean;
+      dirty: boolean;
+      subject: string | null;
+    }>("/api/update/status"),
+
+  runUpdate: () =>
+    request<{ started: boolean }>("/api/update/run", { method: "POST" }),
 };
 
 export type WsEvent =
@@ -323,4 +336,11 @@ export type WsEvent =
       session_id: string | null;
       ts: number;
     }
-  | { type: "sessions_changed"; ts: number };
+  | { type: "sessions_changed"; ts: number }
+  | {
+      type: "update_available";
+      current_sha: string;
+      latest_sha: string;
+      subject: string;
+      ts: number;
+    };

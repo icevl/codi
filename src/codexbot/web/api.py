@@ -70,6 +70,11 @@ from .auth import (
 )
 from .events import EventBus
 from .screenshot_helper import capture_screenshot
+from .update_checker import (
+    get_status as get_update_status,
+    is_dirty as is_repo_dirty,
+    repo_root as get_repo_root,
+)
 
 if TYPE_CHECKING:
     from telegram import Bot
@@ -335,11 +340,13 @@ def create_app(
         response.headers.setdefault("Referrer-Policy", "no-referrer")
         response.headers.setdefault(
             "Content-Security-Policy",
-            "default-src 'self'; img-src 'self' data: blob:; "
+            "default-src 'self'; img-src 'self' data: blob: https://*.tunio.ai; "
             "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
             "font-src 'self' https://fonts.gstatic.com; "
             "script-src 'self'; "
-            "connect-src 'self' ws: wss:; frame-ancestors 'none'",
+            "connect-src 'self' ws: wss: https://*.tunio.ai; "
+            "media-src 'self' blob: https://*.tunio.ai; "
+            "frame-ancestors 'none'",
         )
         return response
 
@@ -1097,6 +1104,47 @@ def create_app(
                 for s in items
             ]
         }
+
+    # -------------------------------------------------------------------
+    # Self-update (git pull + launchd reload)
+    # -------------------------------------------------------------------
+
+    @app.get("/api/update/status")
+    async def update_status(_user: str = Depends(require_auth)) -> dict[str, Any]:
+        status = dict(get_update_status())
+        status["enabled"] = config.auto_update_enabled
+        return status
+
+    @app.post("/api/update/run", status_code=202)
+    async def update_run(_user: str = Depends(require_auth)) -> dict[str, Any]:
+        if not config.auto_update_enabled:
+            raise HTTPException(status_code=403, detail="auto-update is disabled")
+        if is_repo_dirty():
+            raise HTTPException(
+                status_code=409,
+                detail="working tree is dirty — refusing to pull",
+            )
+        # Detach the child so launchctl bootstrap (inside the install
+        # script) can SIGTERM this very process without taking the child
+        # down with it. start_new_session=True breaks the process group
+        # link; stdout/stderr go to /dev/null since we won't be around
+        # to read them. The script handles the build and service reload;
+        # this request just kicks it off and returns immediately.
+        import subprocess as _subprocess
+
+        script = "./scripts/install_macos_launchd.sh"
+        _subprocess.Popen(  # noqa: S603
+            [
+                "sh",
+                "-c",
+                f"git pull --ff-only origin main && {script}",
+            ],
+            cwd=str(get_repo_root()),
+            start_new_session=True,
+            stdout=_subprocess.DEVNULL,
+            stderr=_subprocess.DEVNULL,
+        )
+        return {"started": True}
 
     # -------------------------------------------------------------------
     # WebSocket: per-session terminal

@@ -12,9 +12,12 @@ import {
   Trash2,
   X,
 } from "lucide-react";
+import { TunioPlayer } from "tunio-player";
+import "tunio-player/styles.css";
 import { SessionSummary } from "../api";
 
 const ICON = 16;
+const OFFICE_STREAM_ID = "71824d03-660b-4722-843a-5e8fbe9ad4c2";
 const META_ICON = 12;
 
 export function RuntimeIcon({
@@ -128,6 +131,13 @@ export function Sidebar({
           >
             <X size={ICON} />
           </button>
+          <TunioPlayer
+            id={OFFICE_STREAM_ID}
+            theme="dark"
+            buttonOnly
+            buttonOnlyClassName="codi-sidebar-play"
+            buttonOnlySize={28}
+          />
           <button
             className="icon-button"
             onClick={onLogout}

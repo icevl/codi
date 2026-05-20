@@ -27,6 +27,7 @@ import { ScreenshotModal } from "./components/ScreenshotModal";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { RenameDialog } from "./components/RenameDialog";
 import { Toast } from "./components/Toast";
+import { UpdateBanner } from "./components/UpdateBanner";
 
 type AuthState = "loading" | "anon" | "authed";
 
@@ -793,6 +794,7 @@ export function App() {
         />
       )}
       {toast && <Toast {...toast} />}
+      <UpdateBanner subscribeWs={subscribeWs} />
     </div>
   );
 }

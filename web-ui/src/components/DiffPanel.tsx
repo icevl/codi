@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { GitCommit, RefreshCw, X } from "lucide-react";
+import { GitCommit, X } from "lucide-react";
 import { api, WsEvent } from "../api";
 
 const ICON = 16;
@@ -36,14 +36,12 @@ const EMPTY: DiffState = {
 
 export function DiffPanel({ windowId, open, onClose, subscribeWs }: Props) {
   const [state, setState] = useState<DiffState>(EMPTY);
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Ref instead of state so updates inside the polling closure don't
   // trigger the effect to restart the interval.
   const etagRef = useRef<string | null>(null);
 
   const fetchDiff = useCallback(async () => {
-    setLoading(true);
     try {
       const r = await api.getDiff(windowId, etagRef.current);
       if (r.etag) etagRef.current = r.etag;
@@ -53,8 +51,6 @@ export function DiffPanel({ windowId, open, onClose, subscribeWs }: Props) {
       setError(null);
     } catch (err) {
       setError((err as Error).message);
-    } finally {
-      setLoading(false);
     }
   }, [windowId]);
 
@@ -126,15 +122,6 @@ export function DiffPanel({ windowId, open, onClose, subscribeWs }: Props) {
             <span className="diff-stat-files">not a git repo</span>
           )}
         </div>
-        <button
-          type="button"
-          className="icon-button"
-          onClick={fetchDiff}
-          title="Refresh"
-          aria-label="Refresh"
-        >
-          <RefreshCw size={ICON} className={loading ? "spin" : ""} />
-        </button>
         <button
           type="button"
           className="icon-button"
