@@ -339,6 +339,12 @@ a {
   gap: 6px;
 }
 
+.notification-toggle.active {
+  color: var(--accent);
+  background: var(--bg-3);
+  border-color: var(--border-strong);
+}
+
 /* Higher specificity than `button.icon-button` so the hide rule wins on desktop. */
 button.sidebar-close {
   display: none;
@@ -428,10 +434,35 @@ button.burger {
   background: rgba(255, 255, 255, 0.025);
 }
 
+.session-item.dragging {
+  opacity: 0.56;
+}
+
+.session-item.drag-over {
+  background: rgba(167, 139, 250, 0.11);
+  border-left-color: var(--accent);
+}
+
 .session-row {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+.session-drag-handle {
+  flex: 0 0 auto;
+  color: var(--text-2);
+  cursor: grab;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 22px;
+  opacity: 0.72;
+}
+
+.session-drag-handle:active {
+  cursor: grabbing;
 }
 
 .session-text {
@@ -1878,6 +1909,7 @@ button.burger {
 .term-panel {
   height: 100%;
   width: 100%;
+  position: relative;
   background: var(--bg-1);
   border-left: 1px solid var(--border);
   display: flex;
@@ -1967,6 +1999,11 @@ button.burger {
 
 .term-panel-body .xterm {
   height: 100%;
+}
+
+.term-mobile-controls-toggle,
+.term-mobile-controls {
+  display: none;
 }
 
 /* Office panel — sprite-based agent visualization, mirrors diff-panel layout. */
@@ -2489,6 +2526,92 @@ button.burger {
   .app-shell.office-open .office-panel,
   .app-shell.term-open .term-panel {
     transform: translateX(0);
+  }
+
+  .term-panel.controls-open .term-panel-body {
+    margin-bottom: min(42vh, 236px);
+  }
+
+  .term-mobile-controls-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    position: absolute;
+    right: 14px;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 14px);
+    z-index: 126;
+    width: 42px;
+    height: 42px;
+    padding: 0;
+    border-radius: 8px;
+    background: var(--bg-elevated);
+    border-color: var(--border-strong);
+    box-shadow: 0 8px 22px rgba(0, 0, 0, 0.45);
+  }
+
+  .term-mobile-controls-toggle.active {
+    display: none;
+  }
+
+  .term-mobile-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    position: absolute;
+    left: 10px;
+    right: 10px;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 10px);
+    z-index: 125;
+    max-height: min(42vh, 226px);
+    overflow-y: auto;
+    padding: 8px;
+    background: rgba(31, 33, 38, 0.96);
+    border: 1px solid var(--border-strong);
+    border-radius: 8px;
+    box-shadow: 0 14px 36px rgba(0, 0, 0, 0.5);
+  }
+
+  .term-mobile-controls-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    color: var(--text-1);
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+  }
+
+  .term-mobile-controls-header .icon-button {
+    padding: 4px;
+    background: transparent;
+  }
+
+  .term-mobile-controls-group {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  .term-mobile-controls-label {
+    color: var(--text-2);
+    font-size: 11px;
+  }
+
+  .term-mobile-controls-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .term-mobile-controls-grid button {
+    min-width: 0;
+    min-height: 38px;
+    padding: 6px 4px;
+    border-radius: 8px;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    white-space: nowrap;
   }
 
   .sidebar {

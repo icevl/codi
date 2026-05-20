@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  Bell,
+  BellOff,
   Bot,
   Brain,
+  GripVertical,
   Loader2,
   LogOut,
   MoreVertical,
@@ -52,6 +55,11 @@ interface Props {
   onRename: (session: SessionSummary) => void;
   onPin: (session: SessionSummary, pinned: boolean) => void;
   onDelete: (session: SessionSummary) => void;
+  onReorder: (windowIds: string[]) => void | Promise<void>;
+  notificationsSupported: boolean;
+  notificationsEnabled: boolean;
+  notificationPermission: NotificationPermission | "unsupported";
+  onToggleNotifications: () => void;
 }
 
 function formatRelative(ts: number | null): string {
@@ -62,6 +70,28 @@ function formatRelative(ts: number | null): string {
   if (sec < 3600) return `${Math.floor(sec / 60)}m ago`;
   if (sec < 86400) return `${Math.floor(sec / 3600)}h ago`;
   return `${Math.floor(sec / 86400)}d ago`;
+}
+
+function sessionSortValue(session: SessionSummary): number | null {
+  const order = session.sort_order;
+  return typeof order === "number" && Number.isInteger(order) && order >= 0
+    ? order
+    : null;
+}
+
+function compareSessions(a: SessionSummary, b: SessionSummary): number {
+  if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+  const aOrder = sessionSortValue(a);
+  const bOrder = sessionSortValue(b);
+  if (aOrder !== null && bOrder !== null && aOrder !== bOrder) {
+    return aOrder - bOrder;
+  }
+  if (aOrder !== null && bOrder === null) return -1;
+  if (aOrder === null && bOrder !== null) return 1;
+  const aTs = a.last_activity ?? 0;
+  const bTs = b.last_activity ?? 0;
+  if (aTs !== bTs) return bTs - aTs;
+  return a.name.toLowerCase().localeCompare(b.name.toLowerCase());
 }
 
 export function Sidebar({
@@ -77,23 +107,26 @@ export function Sidebar({
   onRename,
   onPin,
   onDelete,
+  onReorder,
+  notificationsSupported,
+  notificationsEnabled,
+  notificationPermission,
+  onToggleNotifications,
 }: Props) {
-  // Pinned first; within each group, hot sessions on top with a stable
-  // name-based tie-breaker. Mirrors the server-side sort so live WS bumps
-  // re-sort identically.
+  // Pinned first; manual order wins within each group, with activity/name as
+  // fallback for sessions that predate persisted ordering.
   const ordered = useMemo(
-    () =>
-      [...sessions].sort((a, b) => {
-        if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
-        const aTs = a.last_activity ?? 0;
-        const bTs = b.last_activity ?? 0;
-        if (aTs !== bTs) return bTs - aTs;
-        return a.name.toLowerCase().localeCompare(b.name.toLowerCase());
-      }),
+    () => [...sessions].sort(compareSessions),
     [sessions],
+  );
+  const orderedById = useMemo(
+    () => new Map(ordered.map((session) => [session.window_id, session])),
+    [ordered],
   );
 
   const [menuFor, setMenuFor] = useState<string | null>(null);
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [dragOverId, setDragOverId] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
 
   // Close the popover on outside click / Escape / scroll inside the list.
@@ -113,6 +146,35 @@ export function Sidebar({
       document.removeEventListener("keydown", onKey);
     };
   }, [menuFor]);
+
+  const notificationTitle = !notificationsSupported
+    ? "Browser notifications are unavailable"
+    : notificationsEnabled
+    ? "Disable browser notifications"
+    : notificationPermission === "denied"
+    ? "Notifications are blocked in this browser"
+    : "Enable browser notifications";
+
+  const moveSession = (
+    sourceId: string,
+    targetId: string,
+    placement: "before" | "after",
+  ) => {
+    if (sourceId === targetId) return;
+    const source = orderedById.get(sourceId);
+    const target = orderedById.get(targetId);
+    if (!source || !target || source.pinned !== target.pinned) return;
+
+    const next = [...ordered];
+    const from = next.findIndex((session) => session.window_id === sourceId);
+    if (from < 0) return;
+    const [moved] = next.splice(from, 1);
+    let to = next.findIndex((session) => session.window_id === targetId);
+    if (to < 0) return;
+    if (placement === "after") to += 1;
+    next.splice(to, 0, moved);
+    void onReorder(next.map((session) => session.window_id));
+  };
 
   return (
     <aside className="sidebar">
@@ -138,6 +200,17 @@ export function Sidebar({
             buttonOnlyClassName="codi-sidebar-play"
             buttonOnlySize={28}
           />
+          <button
+            className={`icon-button notification-toggle${
+              notificationsEnabled ? " active" : ""
+            }`}
+            onClick={onToggleNotifications}
+            title={notificationTitle}
+            aria-label={notificationTitle}
+            disabled={!notificationsSupported}
+          >
+            {notificationsEnabled ? <Bell size={ICON} /> : <BellOff size={ICON} />}
+          </button>
           <button
             className="icon-button"
             onClick={onLogout}
@@ -174,10 +247,55 @@ export function Sidebar({
                 key={s.window_id}
                 className={`session-item${
                   s.window_id === activeId ? " active" : ""
-                }${s.pinned ? " pinned" : ""}`}
+                }${s.pinned ? " pinned" : ""}${
+                  draggingId === s.window_id ? " dragging" : ""
+                }${dragOverId === s.window_id ? " drag-over" : ""}`}
+                draggable
+                onDragStart={(e) => {
+                  e.dataTransfer.effectAllowed = "move";
+                  e.dataTransfer.setData("text/plain", s.window_id);
+                  setDraggingId(s.window_id);
+                  setDragOverId(null);
+                }}
+                onDragOver={(e) => {
+                  const dragging = draggingId
+                    ? orderedById.get(draggingId)
+                    : null;
+                  if (!dragging || dragging.pinned !== s.pinned) return;
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = "move";
+                  setDragOverId(s.window_id);
+                }}
+                onDragLeave={() => {
+                  setDragOverId((current) =>
+                    current === s.window_id ? null : current,
+                  );
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  const sourceId =
+                    draggingId || e.dataTransfer.getData("text/plain");
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  const placement =
+                    e.clientY > rect.top + rect.height / 2 ? "after" : "before";
+                  setDraggingId(null);
+                  setDragOverId(null);
+                  if (sourceId) moveSession(sourceId, s.window_id, placement);
+                }}
+                onDragEnd={() => {
+                  setDraggingId(null);
+                  setDragOverId(null);
+                }}
                 onClick={() => onSelect(s.window_id)}
               >
                 <div className="session-row">
+                  <span
+                    className="session-drag-handle"
+                    title="Drag to reorder"
+                    aria-hidden="true"
+                  >
+                    <GripVertical size={14} />
+                  </span>
                   <div className="session-text">
                     <div className="session-name">
                       {s.pinned && (

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Terminal as TerminalIcon, X } from "lucide-react";
+import { Keyboard, Terminal as TerminalIcon, X } from "lucide-react";
 import { Terminal as XTerm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
@@ -21,6 +21,48 @@ const FONT_FAMILY =
 // hammering when the backend is truly down. Manual reconnect resets it.
 const RECONNECT_DELAYS = [500, 1000, 2000, 4000, 8000, 15000];
 const TERM_MODE_STORAGE_PREFIX = "codexbot:terminal-mode:";
+const TERM_CONTROLS_STORAGE_KEY = "codexbot:terminal-mobile-controls-open";
+
+const CONTROL_GROUPS: {
+  label: string;
+  buttons: { label: string; title: string; data: string }[];
+}[] = [
+  {
+    label: "Keys",
+    buttons: [
+      { label: "Esc", title: "Escape", data: "\x1b" },
+      { label: "Tab", title: "Tab", data: "\t" },
+      { label: "Enter", title: "Enter", data: "\r" },
+      { label: "Bksp", title: "Backspace", data: "\x7f" },
+    ],
+  },
+  {
+    label: "Move",
+    buttons: [
+      { label: "←", title: "Left", data: "\x1b[D" },
+      { label: "↑", title: "Up", data: "\x1b[A" },
+      { label: "↓", title: "Down", data: "\x1b[B" },
+      { label: "→", title: "Right", data: "\x1b[C" },
+      { label: "Home", title: "Home", data: "\x1b[H" },
+      { label: "End", title: "End", data: "\x1b[F" },
+      { label: "PgUp", title: "Page Up", data: "\x1b[5~" },
+      { label: "PgDn", title: "Page Down", data: "\x1b[6~" },
+    ],
+  },
+  {
+    label: "Ctrl",
+    buttons: [
+      { label: "C", title: "Ctrl-C", data: "\x03" },
+      { label: "D", title: "Ctrl-D", data: "\x04" },
+      { label: "L", title: "Ctrl-L", data: "\x0c" },
+      { label: "A", title: "Ctrl-A", data: "\x01" },
+      { label: "E", title: "Ctrl-E", data: "\x05" },
+      { label: "U", title: "Ctrl-U", data: "\x15" },
+      { label: "R", title: "Ctrl-R", data: "\x12" },
+      { label: "Z", title: "Ctrl-Z", data: "\x1a" },
+    ],
+  },
+];
 
 function isTermMode(value: string | null): value is TermMode {
   return value === "attach" || value === "shell";
@@ -43,6 +85,23 @@ function writeStoredTermMode(windowId: string, mode: TermMode): void {
   }
 }
 
+function readStoredControlsOpen(): boolean {
+  try {
+    const value = localStorage.getItem(TERM_CONTROLS_STORAGE_KEY);
+    return value === null ? true : value === "true";
+  } catch {
+    return true;
+  }
+}
+
+function writeStoredControlsOpen(open: boolean): void {
+  try {
+    localStorage.setItem(TERM_CONTROLS_STORAGE_KEY, String(open));
+  } catch {
+    // ignore storage errors
+  }
+}
+
 export function TerminalPanel({ windowId, open, onClose }: Props) {
   const [modeState, setModeState] = useState<{
     windowId: string;
@@ -56,8 +115,12 @@ export function TerminalPanel({ windowId, open, onClose }: Props) {
   const [status, setStatus] = useState<
     "connecting" | "open" | "reconnecting" | "closed"
   >("connecting");
+  const [controlsOpen, setControlsOpen] = useState(readStoredControlsOpen);
   const [reconnectKey, setReconnectKey] = useState(0);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const termRef = useRef<XTerm | null>(null);
+  const wsRef = useRef<WebSocket | null>(null);
+  const encoderRef = useRef(new TextEncoder());
   // Survives across the effect re-runs that auto-reconnect triggers,
   // so consecutive failures grow the backoff instead of resetting.
   const attemptsRef = useRef(0);
@@ -70,6 +133,23 @@ export function TerminalPanel({ windowId, open, onClose }: Props) {
   const setTerminalMode = (nextMode: TermMode) => {
     writeStoredTermMode(windowId, nextMode);
     setModeState({ windowId, mode: nextMode });
+  };
+
+  const setMobileControlsOpen = (nextOpen: boolean) => {
+    writeStoredControlsOpen(nextOpen);
+    setControlsOpen(nextOpen);
+    termRef.current?.focus();
+  };
+
+  const sendTerminalData = (data: string) => {
+    const ws = wsRef.current;
+    if (ws?.readyState !== WebSocket.OPEN) return;
+    try {
+      ws.send(encoderRef.current.encode(data));
+      termRef.current?.focus();
+    } catch {
+      // ignore dropped input while reconnecting
+    }
   };
 
   useEffect(() => {
@@ -105,6 +185,8 @@ export function TerminalPanel({ windowId, open, onClose }: Props) {
     )}/term?mode=${mode}`;
     const ws = new WebSocket(url);
     ws.binaryType = "arraybuffer";
+    termRef.current = term;
+    wsRef.current = ws;
 
     setStatus("connecting");
 
@@ -172,9 +254,8 @@ export function TerminalPanel({ windowId, open, onClose }: Props) {
 
     // Keystrokes go as binary frames so the backend doesn't try to JSON-
     // parse them as control messages (resize / etc. stay as text frames).
-    const encoder = new TextEncoder();
     const dataDisp = term.onData((data: string) => {
-      if (ws.readyState === WebSocket.OPEN) ws.send(encoder.encode(data));
+      sendTerminalData(data);
     });
 
     // Resize on container size change. fit-addon recalculates rows/cols
@@ -204,11 +285,13 @@ export function TerminalPanel({ windowId, open, onClose }: Props) {
       } catch {
         // ignore
       }
+      if (wsRef.current === ws) wsRef.current = null;
       try {
         term.dispose();
       } catch {
         // ignore
       }
+      if (termRef.current === term) termRef.current = null;
     };
   }, [open, windowId, mode, reconnectKey]);
 
@@ -220,7 +303,9 @@ export function TerminalPanel({ windowId, open, onClose }: Props) {
 
   return (
     <aside
-      className={`term-panel${open ? " open" : ""}`}
+      className={`term-panel${open ? " open" : ""}${
+        controlsOpen ? " controls-open" : ""
+      }`}
       aria-hidden={!open}
     >
       <header className="term-panel-header">
@@ -266,6 +351,51 @@ export function TerminalPanel({ windowId, open, onClose }: Props) {
         </button>
       </header>
       <div className="term-panel-body" ref={containerRef} />
+      <button
+        type="button"
+        className={`term-mobile-controls-toggle${controlsOpen ? " active" : ""}`}
+        onClick={() => setMobileControlsOpen(!controlsOpen)}
+        aria-label={controlsOpen ? "Hide terminal controls" : "Show terminal controls"}
+        title={controlsOpen ? "Hide terminal controls" : "Show terminal controls"}
+      >
+        <Keyboard size={ICON} />
+      </button>
+      {controlsOpen && (
+        <div className="term-mobile-controls" aria-label="Terminal controls">
+          <div className="term-mobile-controls-header">
+            <span>Controls</span>
+            <button
+              type="button"
+              className="icon-button"
+              onClick={() => setMobileControlsOpen(false)}
+              aria-label="Hide terminal controls"
+              title="Hide"
+            >
+              <X size={ICON} />
+            </button>
+          </div>
+          {CONTROL_GROUPS.map((group) => (
+            <div className="term-mobile-controls-group" key={group.label}>
+              <div className="term-mobile-controls-label">{group.label}</div>
+              <div className="term-mobile-controls-grid">
+                {group.buttons.map((button) => (
+                  <button
+                    type="button"
+                    key={`${group.label}:${button.label}`}
+                    title={button.title}
+                    aria-label={button.title}
+                    disabled={status !== "open"}
+                    onPointerDown={(e) => e.preventDefault()}
+                    onClick={() => sendTerminalData(button.data)}
+                  >
+                    {button.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </aside>
   );
 }

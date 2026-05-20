@@ -37,6 +37,15 @@ type AuthState = "loading" | "anon" | "authed";
 // with `false` values omitted, so the file stays small and adding new
 // panel kinds later doesn't require migrations.
 const PANEL_STATE_KEY = "codexbot-panel-state-v1";
+const NOTIFICATION_PREF_KEY = "codexbot-notifications-enabled-v1";
+const INPUT_REQUIRED_TOOL_NAMES = new Set([
+  "request_user_input",
+  "AskUserQuestion",
+  "exit_plan_mode",
+  "ExitPlanMode",
+]);
+
+type BrowserNotificationPermission = NotificationPermission | "unsupported";
 
 type PanelOpenMap = Record<
   string,
@@ -63,6 +72,51 @@ function savePanelOpenMap(map: PanelOpenMap): void {
   } catch {
     // quota / private mode — best-effort persistence.
   }
+}
+
+function browserNotificationsSupported(): boolean {
+  return typeof window !== "undefined" && "Notification" in window;
+}
+
+function readNotificationsEnabled(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.localStorage.getItem(NOTIFICATION_PREF_KEY) === "on";
+  } catch {
+    return false;
+  }
+}
+
+function writeNotificationsEnabled(enabled: boolean): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(NOTIFICATION_PREF_KEY, enabled ? "on" : "off");
+  } catch {
+    // quota / private mode — preference falls back to this page session.
+  }
+}
+
+function currentNotificationPermission(): BrowserNotificationPermission {
+  if (!browserNotificationsSupported()) return "unsupported";
+  return Notification.permission;
+}
+
+function isInputRequiredEvent(event: WsEvent): boolean {
+  return (
+    event.type === "message" &&
+    event.content_type === "tool_use" &&
+    INPUT_REQUIRED_TOOL_NAMES.has(event.tool_name ?? "")
+  );
+}
+
+function notificationKind(event: WsEvent): "completion" | "input" | null {
+  if (event.type === "completion") return "completion";
+  if (isInputRequiredEvent(event)) return "input";
+  return null;
+}
+
+function eventWindowId(event: WsEvent): string | null {
+  return "window_id" in event && event.window_id ? event.window_id : null;
 }
 
 function setFromMap(
@@ -123,6 +177,10 @@ export function App() {
   const [serverEnabled, setServerEnabled] = useState(true);
   const [totpRequired, setTotpRequired] = useState(false);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
+  const sessionsRef = useRef<SessionSummary[]>([]);
+  useEffect(() => {
+    sessionsRef.current = sessions;
+  }, [sessions]);
   // Track whether the first /api/sessions response has landed. Until
   // then we mustn't show an "empty state" — the actual data is just
   // in-flight, and flashing "No sessions" while it loads is a UX bug.
@@ -152,6 +210,20 @@ export function App() {
   // Windows where the agent finished while the user wasn't looking. Cleared
   // when the user opens that window.
   const [doneIds, setDoneIds] = useState<Set<string>>(() => new Set());
+  const [notificationsEnabled, setNotificationsEnabled] = useState(
+    readNotificationsEnabled,
+  );
+  const [notificationPermission, setNotificationPermission] =
+    useState<BrowserNotificationPermission>(currentNotificationPermission);
+  const notificationsEnabledRef = useRef(notificationsEnabled);
+  const notificationPermissionRef = useRef(notificationPermission);
+  const notifiedEventsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    notificationsEnabledRef.current = notificationsEnabled;
+  }, [notificationsEnabled]);
+  useEffect(() => {
+    notificationPermissionRef.current = notificationPermission;
+  }, [notificationPermission]);
   // Per-window watchdog timers. WS reconnects don't replay history, so if a
   // `stream_end` fires while we're offline the busy flag would stick forever.
   // Each incoming `stream` event resets a 3s timer; on expiry we treat the
@@ -223,6 +295,88 @@ export function App() {
   const showToast = useCallback((text: string, kind: "info" | "error" = "info") => {
     setToast({ text, kind });
     window.setTimeout(() => setToast(null), 3200);
+  }, []);
+
+  const handleToggleNotifications = useCallback(async () => {
+    if (!browserNotificationsSupported()) {
+      setNotificationPermission("unsupported");
+      showToast("Browser notifications are unavailable", "error");
+      return;
+    }
+    if (notificationsEnabledRef.current) {
+      writeNotificationsEnabled(false);
+      setNotificationsEnabled(false);
+      showToast("Notifications disabled");
+      return;
+    }
+
+    let permission = Notification.permission;
+    try {
+      if (permission === "default") {
+        permission = await Notification.requestPermission();
+      }
+    } catch {
+      showToast("Notification permission request failed", "error");
+      return;
+    }
+    setNotificationPermission(permission);
+    if (permission !== "granted") {
+      writeNotificationsEnabled(false);
+      setNotificationsEnabled(false);
+      showToast("Notifications are blocked in this browser", "error");
+      return;
+    }
+    writeNotificationsEnabled(true);
+    setNotificationsEnabled(true);
+    showToast("Notifications enabled");
+  }, [showToast]);
+
+  const maybeNotify = useCallback((event: WsEvent) => {
+    const kind = notificationKind(event);
+    const windowId = eventWindowId(event);
+    if (!kind || !windowId) return;
+    if (!notificationsEnabledRef.current) return;
+    if (!browserNotificationsSupported()) return;
+
+    const permission = Notification.permission;
+    if (permission !== notificationPermissionRef.current) {
+      setNotificationPermission(permission);
+    }
+    if (permission !== "granted") return;
+    if (
+      document.visibilityState !== "hidden" &&
+      windowId === activeIdRef.current
+    ) {
+      return;
+    }
+
+    const key =
+      "seq" in event && event.seq
+        ? `${kind}:${event.seq}`
+        : `${kind}:${windowId}:${"ts" in event ? event.ts : 0}`;
+    if (notifiedEventsRef.current.has(key)) return;
+    notifiedEventsRef.current.add(key);
+    if (notifiedEventsRef.current.size > 200) {
+      const oldest = notifiedEventsRef.current.values().next().value;
+      if (oldest) notifiedEventsRef.current.delete(oldest);
+    }
+
+    const session = sessionsRef.current.find((s) => s.window_id === windowId);
+    const title = kind === "input" ? "Codi needs input" : "Codi finished";
+    const body = session?.name ?? windowId;
+    try {
+      const notification = new Notification(title, {
+        body,
+        tag: `codi:${windowId}:${key}`,
+      });
+      notification.onclick = () => {
+        window.focus();
+        setActiveId(windowId);
+      };
+    } catch {
+      // Notification construction can fail if the browser revokes permission
+      // between the check above and construction.
+    }
   }, []);
 
   // Bootstrap auth check.
@@ -351,6 +505,7 @@ export function App() {
           }
         }
 
+        maybeNotify(event);
         for (const l of wsListeners.current) l(event);
       }
     });
@@ -365,7 +520,7 @@ export function App() {
       busyWatchdogs.current = {};
       setBusyIds(new Set());
     };
-  }, [auth, refreshSessions]);
+  }, [auth, refreshSessions, maybeNotify]);
 
   const subscribeWs = useCallback((listener: (e: WsEvent) => void) => {
     wsListeners.current.add(listener);
@@ -544,6 +699,30 @@ export function App() {
     [showToast],
   );
 
+  const handleSidebarReorder = useCallback(
+    async (windowIds: string[]) => {
+      const previous = sessionsRef.current;
+      const orderById = new Map(
+        windowIds.map((windowId, index) => [windowId, index]),
+      );
+      setSessions((prev) =>
+        prev.map((session) => {
+          const nextOrder = orderById.get(session.window_id);
+          return nextOrder === undefined
+            ? session
+            : { ...session, sort_order: nextOrder };
+        }),
+      );
+      try {
+        await api.reorderSessions(windowIds);
+      } catch (err) {
+        setSessions(previous);
+        showToast((err as Error).message, "error");
+      }
+    },
+    [showToast],
+  );
+
   if (auth === "loading") {
     return (
       <div className="login-shell">
@@ -650,6 +829,11 @@ export function App() {
         onRename={setRenameTarget}
         onPin={handleSidebarPin}
         onDelete={setKillTarget}
+        onReorder={handleSidebarReorder}
+        notificationsSupported={browserNotificationsSupported()}
+        notificationsEnabled={notificationsEnabled}
+        notificationPermission={notificationPermission}
+        onToggleNotifications={handleToggleNotifications}
       />
       <div
         className="sidebar-backdrop"

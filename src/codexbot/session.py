@@ -70,6 +70,7 @@ class WindowState:
     window_name: str = ""
     runtime: str = "codex"
     pinned: bool = False
+    sort_order: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         data: dict[str, Any] = {
@@ -81,16 +82,27 @@ class WindowState:
             data["window_name"] = self.window_name
         if self.pinned:
             data["pinned"] = True
+        if self.sort_order is not None:
+            data["sort_order"] = self.sort_order
         return data
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "WindowState":
+        raw_sort_order = data.get("sort_order")
+        sort_order = (
+            raw_sort_order
+            if isinstance(raw_sort_order, int)
+            and not isinstance(raw_sort_order, bool)
+            and raw_sort_order >= 0
+            else None
+        )
         return cls(
             session_id=data.get("session_id", ""),
             cwd=data.get("cwd", ""),
             window_name=data.get("window_name", ""),
             runtime=data.get("runtime", "codex"),
             pinned=bool(data.get("pinned", False)),
+            sort_order=sort_order,
         )
 
 
@@ -205,7 +217,7 @@ class SessionManager:
 
     def _save_state(self) -> None:
         state: dict[str, Any] = {
-            "schema_version": 3,
+            "schema_version": 4,
             "window_states": {k: v.to_dict() for k, v in self.window_states.items()},
             "user_window_offsets": {
                 str(uid): offsets for uid, offsets in self.user_window_offsets.items()
@@ -246,13 +258,12 @@ class SessionManager:
             self.group_chat_ids = {
                 k: int(v) for k, v in state.get("group_chat_ids", {}).items()
             }
-            if schema_version < 3:
-                # v2 → v3: WindowState gained a `runtime` field. `from_dict`
-                # has already defaulted missing entries to "codex"; persist
-                # the upgrade so the file no longer carries the legacy
-                # top-level `runtime` field.
+            if schema_version < 4:
+                # v2 → v3: WindowState gained a `runtime` field. v4 adds
+                # optional `sort_order`. `from_dict` has already defaulted
+                # missing values, so persisting once upgrades the shape.
                 logger.info(
-                    "Migrating state.json from schema_version=%s to 3", schema_version
+                    "Migrating state.json from schema_version=%s to 4", schema_version
                 )
                 self._save_state()
         except (json.JSONDecodeError, ValueError, TypeError) as e:

@@ -107,6 +107,12 @@ class PatchSessionRequest(BaseModel):
     pinned: bool | None = None
 
 
+class ReorderSessionsRequest(BaseModel):
+    """PATCH /api/sessions/order body."""
+
+    window_ids: list[str] = Field(min_length=1, max_length=500)
+
+
 class SendTextRequest(BaseModel):
     text: str
     enter: bool = True
@@ -163,6 +169,34 @@ def _safe_tmux_name_part(value: str) -> str:
         ch if ch.isalnum() or ch in "._-" else "_" for ch in value.strip()
     )
     return cleaned.strip("._-") or "session"
+
+
+def _valid_sort_order(value: Any) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None
+    return value
+
+
+def _session_summary_sort_key(
+    summary: dict[str, Any],
+) -> tuple[int, int, int, float, str]:
+    order = _valid_sort_order(summary.get("sort_order"))
+    return (
+        0 if summary.get("pinned") else 1,
+        0 if order is not None else 1,
+        order if order is not None else 0,
+        -(summary.get("last_activity") or 0.0),
+        str(summary.get("name") or "").lower(),
+    )
+
+
+def _next_window_sort_order() -> int:
+    orders = [
+        state.sort_order
+        for state in session_manager.window_states.values()
+        if state.sort_order is not None
+    ]
+    return max(orders, default=-1) + 1
 
 
 def _persistent_shell_session_name(window_id: str) -> str:
@@ -558,17 +592,12 @@ def create_app(
                     "pane_command": w.pane_current_command,
                     "last_activity": last_activity,
                     "pinned": bool(ws.pinned),
+                    "sort_order": ws.sort_order,
                 }
             )
-        # Pinned sessions float to the top; within each group, hot sessions
-        # first, then name for a stable tie-breaker.
-        result.sort(
-            key=lambda s: (
-                0 if s["pinned"] else 1,
-                -(s["last_activity"] or 0.0),
-                s["name"].lower(),
-            )
-        )
+        # Pinned sessions float to the top; manual order wins inside each
+        # group, with activity/name as the stable fallback for older state.
+        result.sort(key=_session_summary_sort_key)
         return {"sessions": result}
 
     @app.post("/api/sessions")
@@ -596,6 +625,7 @@ def create_app(
         ws.runtime = runtime.name
         ws.cwd = str(path)
         ws.window_name = wname
+        ws.sort_order = _next_window_sort_order()
         session_manager._save_state()
 
         if runtime.name == "claude":
@@ -637,6 +667,11 @@ def create_app(
             "cwd": str(path),
             "runtime": runtime.name,
             "session_id": ws.session_id or None,
+            "tmux_name": wname,
+            "pane_command": "",
+            "last_activity": None,
+            "pinned": bool(ws.pinned),
+            "sort_order": ws.sort_order,
             "telegram_thread_id": thread_id,
             "telegram_mirror_error": mirror_err,
         }
@@ -654,6 +689,31 @@ def create_app(
         await _delete_telegram_topic(bot, window_id)
         session_manager.window_states.pop(window_id, None)
         session_manager.window_display_names.pop(window_id, None)
+        session_manager._save_state()
+        await bus.publish_sessions_changed()
+        return {"ok": True}
+
+    @app.patch("/api/sessions/order")
+    async def reorder_sessions(
+        req: ReorderSessionsRequest,
+        _user: str = Depends(require_auth),
+    ) -> dict[str, Any]:
+        windows = await tmux_manager.list_windows()
+        live_ids = {w.window_id for w in windows}
+        seen: set[str] = set()
+        ordered_ids: list[str] = []
+        for window_id in req.window_ids:
+            if window_id in seen:
+                raise HTTPException(400, detail=f"duplicate window id: {window_id}")
+            seen.add(window_id)
+            if window_id not in live_ids:
+                raise HTTPException(404, detail=f"window not found: {window_id}")
+            ordered_ids.append(window_id)
+
+        for idx, window_id in enumerate(ordered_ids):
+            state = session_manager.get_window_state(window_id)
+            state.sort_order = idx
+
         session_manager._save_state()
         await bus.publish_sessions_changed()
         return {"ok": True}

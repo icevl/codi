@@ -13,6 +13,7 @@ export interface SessionSummary {
   pane_command: string;
   last_activity: number | null;
   pinned: boolean;
+  sort_order: number | null;
 }
 
 export interface SessionMessage {
@@ -153,6 +154,11 @@ export const api = {
       `/api/sessions/${encodeURIComponent(windowId)}`,
       { method: "PATCH", json: { pinned } },
     ),
+  reorderSessions: (windowIds: string[]) =>
+    request<{ ok: boolean }>("/api/sessions/order", {
+      method: "PATCH",
+      json: { window_ids: windowIds },
+    }),
   getMessages: (
     windowId: string,
     opts?: {

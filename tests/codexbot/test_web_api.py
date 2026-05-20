@@ -17,7 +17,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from codexbot import config as config_module
-from codexbot.session import CodexSession, HistorySnapshot
+from codexbot.session import CodexSession, HistorySnapshot, WindowState
 from codexbot.tmux_manager import TmuxWindow
 from codexbot.web.api import create_app
 from codexbot.web.events import EventBus
@@ -128,6 +128,140 @@ def test_list_sessions_returns_windows(
     assert len(body["sessions"]) == 1
     assert body["sessions"][0]["window_id"] == "@5"
     assert body["sessions"][0]["runtime"] in {"codex", "claude"}
+    assert "sort_order" in body["sessions"][0]
+
+
+def test_list_sessions_uses_manual_order_and_keeps_pinned_first(
+    authed_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake_windows = [
+        TmuxWindow(
+            window_id="@1",
+            window_name="one",
+            cwd="/tmp/one",
+            pane_current_command="codex",
+        ),
+        TmuxWindow(
+            window_id="@2",
+            window_name="two",
+            cwd="/tmp/two",
+            pane_current_command="codex",
+        ),
+        TmuxWindow(
+            window_id="@3",
+            window_name="three",
+            cwd="/tmp/three",
+            pane_current_command="codex",
+        ),
+    ]
+
+    async def fake_list() -> list[TmuxWindow]:
+        return fake_windows
+
+    from codexbot.web import api as web_api
+
+    monkeypatch.setattr(web_api.tmux_manager, "list_windows", fake_list)
+    monkeypatch.setattr(
+        web_api.session_manager,
+        "_refresh_sessions_index",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        web_api.session_manager,
+        "window_states",
+        {
+            "@1": WindowState(session_id="s1", sort_order=2),
+            "@2": WindowState(session_id="s2", sort_order=0),
+            "@3": WindowState(session_id="s3", pinned=True, sort_order=99),
+        },
+    )
+    monkeypatch.setattr(
+        web_api.session_manager,
+        "_session_mtime_index",
+        {"s1": 100.0, "s2": 200.0, "s3": 50.0},
+    )
+
+    r = authed_client.get("/api/sessions")
+
+    assert r.status_code == 200, r.text
+    assert [s["window_id"] for s in r.json()["sessions"]] == ["@3", "@2", "@1"]
+
+
+def test_reorder_sessions_persists_sort_order(
+    authed_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake_windows = [
+        TmuxWindow(
+            window_id="@1",
+            window_name="one",
+            cwd="/tmp/one",
+            pane_current_command="codex",
+        ),
+        TmuxWindow(
+            window_id="@2",
+            window_name="two",
+            cwd="/tmp/two",
+            pane_current_command="codex",
+        ),
+        TmuxWindow(
+            window_id="@3",
+            window_name="three",
+            cwd="/tmp/three",
+            pane_current_command="codex",
+        ),
+    ]
+    saved: list[bool] = []
+
+    async def fake_list() -> list[TmuxWindow]:
+        return fake_windows
+
+    from codexbot.web import api as web_api
+
+    monkeypatch.setattr(web_api.tmux_manager, "list_windows", fake_list)
+    monkeypatch.setattr(
+        web_api.session_manager,
+        "window_states",
+        {"@1": WindowState(), "@2": WindowState(), "@3": WindowState()},
+    )
+    monkeypatch.setattr(
+        web_api.session_manager,
+        "_save_state",
+        lambda: saved.append(True),
+    )
+
+    r = authed_client.patch(
+        "/api/sessions/order",
+        json={"window_ids": ["@3", "@1", "@2"]},
+    )
+
+    assert r.status_code == 200, r.text
+    assert r.json() == {"ok": True}
+    assert web_api.session_manager.window_states["@3"].sort_order == 0
+    assert web_api.session_manager.window_states["@1"].sort_order == 1
+    assert web_api.session_manager.window_states["@2"].sort_order == 2
+    assert saved == [True]
+
+
+def test_reorder_sessions_rejects_duplicate_window_ids(
+    authed_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def fake_list() -> list[TmuxWindow]:
+        return [
+            TmuxWindow(
+                window_id="@1",
+                window_name="one",
+                cwd="/tmp/one",
+                pane_current_command="codex",
+            )
+        ]
+
+    from codexbot.web import api as web_api
+
+    monkeypatch.setattr(web_api.tmux_manager, "list_windows", fake_list)
+
+    r = authed_client.patch("/api/sessions/order", json={"window_ids": ["@1", "@1"]})
+
+    assert r.status_code == 400
 
 
 def test_get_messages_returns_history_metadata(

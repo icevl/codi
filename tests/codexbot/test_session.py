@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 import pytest
 
-from codexbot.session import CodexSession, HistorySnapshot, SessionManager
+from codexbot.session import CodexSession, HistorySnapshot, SessionManager, WindowState
 from codexbot.transcript_parser import TranscriptParser
 
 
@@ -161,6 +161,19 @@ class TestWindowState:
     def test_runtime_defaults_to_codex(self, mgr: SessionManager) -> None:
         state = mgr.get_window_state("@0")
         assert state.runtime == "codex"
+
+    def test_sort_order_round_trips_when_valid(self) -> None:
+        state = WindowState(session_id="abc", cwd="/tmp", sort_order=7)
+
+        restored = WindowState.from_dict(state.to_dict())
+
+        assert restored.sort_order == 7
+
+    @pytest.mark.parametrize("value", [-1, "3", True, None])
+    def test_invalid_sort_order_loads_as_none(self, value: object) -> None:
+        state = WindowState.from_dict({"sort_order": value})
+
+        assert state.sort_order is None
 
 
 class TestClaudeTranscriptPath:
