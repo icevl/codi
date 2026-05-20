@@ -184,6 +184,56 @@ def test_get_messages_returns_history_metadata(
     }
 
 
+def test_get_slash_commands_returns_registry_response(
+    authed_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from codexbot.web import api as web_api
+
+    calls: list[dict[str, str | None]] = []
+
+    class CommandSet:
+        def to_response(self) -> dict[str, Any]:
+            return {
+                "runtime": "claude",
+                "window_id": "@5",
+                "session_id": "session-1",
+                "commands": [
+                    {"command": "/clear", "description": "Clear conversation"}
+                ],
+                "source": "discovered",
+                "updated_at": 1.0,
+            }
+
+    def fake_get_commands(
+        runtime: str | None,
+        *,
+        window_id: str | None = None,
+        session_id: str | None = None,
+    ) -> CommandSet:
+        calls.append(
+            {"runtime": runtime, "window_id": window_id, "session_id": session_id}
+        )
+        return CommandSet()
+
+    state = web_api.session_manager.get_window_state("@5")
+    state.runtime = "claude"
+    state.session_id = "session-1"
+    monkeypatch.setattr(
+        web_api.slash_command_registry,
+        "get_commands",
+        fake_get_commands,
+    )
+
+    r = authed_client.get("/api/slash-commands?window_id=@5")
+    assert r.status_code == 200, r.text
+    assert r.json()["commands"] == [
+        {"command": "/clear", "description": "Clear conversation"}
+    ]
+    assert calls == [
+        {"runtime": "claude", "window_id": "@5", "session_id": "session-1"}
+    ]
+
+
 def test_send_text_invokes_session_manager(
     authed_client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:

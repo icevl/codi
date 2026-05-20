@@ -58,6 +58,7 @@ from pydantic import BaseModel, Field
 from ..config import config
 from ..runtimes import all_runtimes, get_runtime
 from ..session import session_manager
+from ..slash_commands import slash_command_registry
 from ..skills import discover_skills
 from ..tmux_manager import tmux_manager
 from ..utils import codexbot_dir
@@ -557,6 +558,8 @@ def create_app(
                 ws.session_id = req.resume_session_id
                 session_manager._save_state()
 
+        await session_manager.schedule_slash_command_discovery(wid)
+
         # Mirror to Telegram (best-effort — tmux session is fine even if
         # the forum topic can't be created).
         thread_id, mirror_err = await _create_telegram_topic(bot, wid, wname)
@@ -1002,6 +1005,25 @@ def create_app(
     ) -> dict[str, Any]:
         names = discover_skills(runtime)
         return {"skills": names, "runtime": runtime}
+
+    @app.get("/api/slash-commands")
+    async def slash_commands(
+        runtime: str | None = Query(None),
+        window_id: str | None = Query(None),
+        _user: str = Depends(require_auth),
+    ) -> dict[str, Any]:
+        session_id: str | None = None
+        runtime_name = runtime
+        if window_id:
+            state = session_manager.get_window_state(window_id)
+            runtime_name = runtime_name or state.runtime
+            session_id = state.session_id or None
+        command_set = slash_command_registry.get_commands(
+            runtime_name,
+            window_id=window_id,
+            session_id=session_id,
+        )
+        return command_set.to_response()
 
     # -------------------------------------------------------------------
     # Office viz state — the agent-visualization panel persists its custom

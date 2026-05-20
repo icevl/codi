@@ -40,6 +40,20 @@ export interface RuntimeInfo {
   emoji: string;
 }
 
+export interface SlashCommandHint {
+  command: string;
+  description: string;
+}
+
+export interface SlashCommandsResponse {
+  runtime: string;
+  window_id: string | null;
+  session_id: string | null;
+  commands: SlashCommandHint[];
+  source: string;
+  updated_at: number | null;
+}
+
 export interface DirectoryEntry {
   name: string;
   path: string;
@@ -202,6 +216,14 @@ export const api = {
 
   listRuntimes: () =>
     request<{ runtimes: RuntimeInfo[] }>("/api/runtimes"),
+  listSlashCommands: (runtime: string, windowId?: string | null) => {
+    const params = new URLSearchParams();
+    params.set("runtime", runtime);
+    if (windowId) params.set("window_id", windowId);
+    return request<SlashCommandsResponse>(
+      `/api/slash-commands?${params.toString()}`,
+    );
+  },
   listSkills: (runtime: string) =>
     request<{ skills: string[]; runtime: string }>(
       `/api/skills?runtime=${encodeURIComponent(runtime)}`,
@@ -337,6 +359,14 @@ export type WsEvent =
       ts: number;
     }
   | { type: "sessions_changed"; ts: number }
+  | {
+      type: "slash_commands_changed";
+      runtime: string;
+      window_id: string;
+      session_id: string;
+      source: string;
+      ts: number;
+    }
   | {
       type: "update_available";
       current_sha: string;

@@ -32,6 +32,7 @@ import {
   SessionMessage,
   SessionMessagesResponse,
   SessionSummary,
+  SlashCommandHint,
   WsEvent,
 } from "../api";
 import { SkillsModal } from "./SkillsModal";
@@ -69,12 +70,7 @@ const BOT_COMMANDS: Record<string, string> = {
   "/start": "Welcome message",
 };
 
-type SlashCommandHint = {
-  command: string;
-  description: string;
-};
-
-const CODEX_SLASH_COMMANDS: SlashCommandHint[] = [
+const FALLBACK_CODEX_SLASH_COMMANDS: SlashCommandHint[] = [
   { command: "/clear", description: "Clear conversation history" },
   { command: "/new", description: "Start a new conversation" },
   { command: "/compact", description: "Compact conversation context" },
@@ -87,7 +83,7 @@ const CODEX_SLASH_COMMANDS: SlashCommandHint[] = [
   { command: "/skills", description: "List Codex skills" },
 ];
 
-const CLAUDE_SLASH_COMMANDS: SlashCommandHint[] = [
+const FALLBACK_CLAUDE_SLASH_COMMANDS: SlashCommandHint[] = [
   { command: "/clear", description: "Clear conversation history" },
   { command: "/compact", description: "Compact conversation context" },
   { command: "/config", description: "Open Claude Code configuration" },
@@ -313,7 +309,9 @@ function responseNewestTimestamp(
 }
 
 function agentSlashCommandsForRuntime(runtime: string): SlashCommandHint[] {
-  return runtime === "claude" ? CLAUDE_SLASH_COMMANDS : CODEX_SLASH_COMMANDS;
+  return runtime === "claude"
+    ? FALLBACK_CLAUDE_SLASH_COMMANDS
+    : FALLBACK_CODEX_SLASH_COMMANDS;
 }
 
 function slashTokenRange(
@@ -589,10 +587,34 @@ export function ChatView({
     hasMoreRef.current = hasMore;
   }, [hasMore]);
 
-  const agentSlashCommands = useMemo(
+  const fallbackSlashCommands = useMemo(
     () => agentSlashCommandsForRuntime(session.runtime),
     [session.runtime],
   );
+  const [agentSlashCommands, setAgentSlashCommands] =
+    useState<SlashCommandHint[]>(fallbackSlashCommands);
+
+  const loadSlashCommands = useCallback(async () => {
+    const runtime = session.runtime;
+    const windowId = session.window_id;
+    setAgentSlashCommands(fallbackSlashCommands);
+    try {
+      const response = await api.listSlashCommands(runtime, windowId);
+      if (windowIdRef.current !== windowId) return;
+      const commands =
+        response.commands.length > 0 ? response.commands : fallbackSlashCommands;
+      setAgentSlashCommands(commands);
+    } catch {
+      if (windowIdRef.current === windowId) {
+        setAgentSlashCommands(fallbackSlashCommands);
+      }
+    }
+  }, [fallbackSlashCommands, session.runtime, session.window_id]);
+
+  useEffect(() => {
+    void loadSlashCommands();
+  }, [loadSlashCommands]);
+
   const slashHints = useMemo(() => {
     if (!slashRange) return [];
     const prefix = `/${slashRange.query}`;
@@ -1041,6 +1063,15 @@ export function ChatView({
     };
 
     return subscribeWs((event) => {
+      if (event.type === "slash_commands_changed") {
+        if (
+          event.window_id === windowIdRef.current ||
+          event.runtime === session.runtime
+        ) {
+          void loadSlashCommands();
+        }
+        return;
+      }
       if (event.type === "stream") {
         if (!isCurrentSession(event)) return;
         setStreaming({ text: event.text, status: event.status });
@@ -1117,7 +1148,7 @@ export function ChatView({
         return next;
       });
     });
-  }, [storeHistoryCache, subscribeWs]);
+  }, [loadSlashCommands, session.runtime, storeHistoryCache, subscribeWs]);
 
   // Poll git branch for the current window. The pane cwd can drift if the
   // user `cd`s inside the shell, and there's no event for that, so polling
