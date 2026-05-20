@@ -1293,9 +1293,7 @@ def create_app(
             cleanup_session = view_name
         else:
             try:
-                shell_session = await _ensure_persistent_shell_session(
-                    window_id, cwd
-                )
+                shell_session = await _ensure_persistent_shell_session(window_id, cwd)
             except RuntimeError as exc:
                 logger.error("Failed to prepare persistent shell: %s", exc)
                 await websocket.close(code=1011)
