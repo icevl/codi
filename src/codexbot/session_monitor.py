@@ -62,6 +62,8 @@ class NewMessage:
     tool_input: dict[str, Any] | None = None
     image_data: list[tuple[str, bytes]] | None = None
     timestamp: str | None = None
+    transcript_offset: int | None = None
+    transcript_index: int | None = None
 
 
 @dataclass
@@ -305,8 +307,10 @@ class SessionMonitor:
                 safe_offset = session.last_byte_offset
                 partial_line_seen = False
                 async for line in f:
+                    line_offset = safe_offset
                     data = TranscriptParser.parse_line(line)
                     if data:
+                        data[TranscriptParser.TRANSCRIPT_OFFSET_KEY] = line_offset
                         new_entries.append(data)
                         safe_offset = await f.tell()
                     elif line.strip():
@@ -442,6 +446,9 @@ class SessionMonitor:
                             is_stale=False,
                         )
                         if completion:
+                            completion.timestamp = entry.timestamp
+                            completion.transcript_offset = entry.transcript_offset
+                            completion.transcript_index = entry.transcript_index
                             new_messages.append(completion)
                         continue
 
@@ -498,6 +505,8 @@ class SessionMonitor:
                             tool_input=entry.tool_input,
                             image_data=entry.image_data,
                             timestamp=entry.timestamp,
+                            transcript_offset=entry.transcript_offset,
+                            transcript_index=entry.transcript_index,
                         )
                     )
                     if stale_completion:

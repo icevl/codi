@@ -264,6 +264,8 @@ class TestHistoryCache:
 
         assert [m["text"] for m in first.messages] == ["hello"]
         assert [m["text"] for m in second.messages] == ["hello"]
+        assert first.messages[0]["transcript_offset"] == 0
+        assert first.messages[0]["transcript_index"] == 0
         assert parse_entries.call_count == 1
 
     @pytest.mark.asyncio

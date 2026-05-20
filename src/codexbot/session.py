@@ -1078,25 +1078,10 @@ class SessionManager:
         if not file_path.exists():
             return [], 0
 
-        entries: list[dict] = []
         try:
-            async with aiofiles.open(file_path, "r", encoding="utf-8") as f:
-                if start_byte > 0:
-                    await f.seek(start_byte)
-
-                while True:
-                    if end_byte is not None:
-                        cur = await f.tell()
-                        if cur >= end_byte:
-                            break
-
-                    line = await f.readline()
-                    if not line:
-                        break
-
-                    data = TranscriptParser.parse_line(line)
-                    if data:
-                        entries.append(data)
+            entries = await self._read_transcript_entries(
+                file_path, start_byte=start_byte, end_byte=end_byte
+            )
         except OSError as e:
             logger.error("Error reading session file %s: %s", file_path, e)
             return [], 0
@@ -1198,6 +1183,9 @@ class SessionManager:
                     cur = await f.tell()
                     if cur >= end_byte:
                         break
+                    line_offset = cur
+                else:
+                    line_offset = await f.tell()
 
                 line = await f.readline()
                 if not line:
@@ -1205,6 +1193,7 @@ class SessionManager:
 
                 data = TranscriptParser.parse_line(line)
                 if data:
+                    data[TranscriptParser.TRANSCRIPT_OFFSET_KEY] = line_offset
                     entries.append(data)
         return entries
 
@@ -1233,6 +1222,10 @@ def _messages_from_parsed(parsed_entries: list[Any]) -> list[dict[str, Any]]:
             message["tool_input"] = e.tool_input
         if getattr(e, "tool_use_id", None) is not None:
             message["tool_use_id"] = e.tool_use_id
+        if getattr(e, "transcript_offset", None) is not None:
+            message["transcript_offset"] = e.transcript_offset
+        if getattr(e, "transcript_index", None) is not None:
+            message["transcript_index"] = e.transcript_index
         messages.append(message)
     return messages
 

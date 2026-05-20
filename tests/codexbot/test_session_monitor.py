@@ -14,7 +14,7 @@ from codexbot.session_monitor import (
     SessionInfo,
     SessionMonitor,
 )
-from codexbot.transcript_parser import ParsedEntry
+from codexbot.transcript_parser import ParsedEntry, TranscriptParser
 
 
 class TestReadNewLinesOffsetRecovery:
@@ -57,6 +57,29 @@ class TestReadNewLinesOffsetRecovery:
         # Offset should now point to start of line 2
         line1_full = len(json.dumps(entry1).encode("utf-8")) + 1  # +1 for newline
         assert session.last_byte_offset == line1_full
+
+    @pytest.mark.asyncio
+    async def test_read_new_lines_stamps_transcript_offsets(
+        self, monitor, tmp_path, make_jsonl_entry
+    ):
+        jsonl_file = tmp_path / "session.jsonl"
+        entry1 = make_jsonl_entry(msg_type="assistant", content="first message")
+        entry2 = make_jsonl_entry(msg_type="assistant", content="second message")
+        line1 = json.dumps(entry1) + "\n"
+        line2 = json.dumps(entry2) + "\n"
+        jsonl_file.write_text(line1 + line2, encoding="utf-8")
+        session = TrackedSession(
+            session_id="test-session",
+            file_path=str(jsonl_file),
+            last_byte_offset=0,
+        )
+
+        result = await monitor._read_new_lines(session, jsonl_file)
+
+        assert [entry[TranscriptParser.TRANSCRIPT_OFFSET_KEY] for entry in result] == [
+            0,
+            len(line1.encode("utf-8")),
+        ]
 
     @pytest.mark.asyncio
     async def test_valid_offset_reads_normally(

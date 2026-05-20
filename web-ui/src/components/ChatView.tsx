@@ -124,6 +124,10 @@ type HistoryCacheEntry = {
   newestTimestamp: string | null;
   historyVersion: string | null;
 };
+type TranscriptPosition = {
+  offset: number;
+  index: number;
+};
 type SlashTokenRange = {
   start: number;
   end: number;
@@ -172,6 +176,42 @@ function firstTimestamp(messages: SessionMessage[]): string | null {
     if (m.timestamp) return m.timestamp;
   }
   return null;
+}
+
+function messageTranscriptPosition(
+  m: SessionMessage,
+): TranscriptPosition | null {
+  const offset = m.transcript_offset;
+  if (typeof offset !== "number" || !Number.isFinite(offset) || offset < 0) {
+    return null;
+  }
+  const rawIndex = m.transcript_index;
+  const index =
+    typeof rawIndex === "number" && Number.isFinite(rawIndex) && rawIndex >= 0
+      ? rawIndex
+      : 0;
+  return { offset, index };
+}
+
+function compareTranscriptPositions(
+  a: TranscriptPosition,
+  b: TranscriptPosition,
+): number {
+  if (a.offset !== b.offset) return a.offset - b.offset;
+  return a.index - b.index;
+}
+
+function latestTranscriptPosition(
+  messages: SessionMessage[],
+): TranscriptPosition | null {
+  let latest: TranscriptPosition | null = null;
+  for (const m of messages) {
+    const pos = messageTranscriptPosition(m);
+    if (pos && (!latest || compareTranscriptPositions(pos, latest) > 0)) {
+      latest = pos;
+    }
+  }
+  return latest;
 }
 
 function messageContentKey(m: SessionMessage): string {
@@ -306,9 +346,18 @@ function findDuplicateMessageIndex(
   messages: ChatMessage[],
   incoming: SessionMessage,
 ): number {
+  const incomingPosition = messageTranscriptPosition(incoming);
   const incomingKey = messageContentKey(incoming);
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const existing = messages[i];
+    const existingPosition = messageTranscriptPosition(existing);
+    if (
+      incomingPosition &&
+      existingPosition &&
+      compareTranscriptPositions(incomingPosition, existingPosition) === 0
+    ) {
+      return i;
+    }
     if (
       existing.pending &&
       incoming.role === "user" &&
@@ -337,12 +386,17 @@ function reconcileMessage(
   const clearedPending = !!existing.pending;
   const learnedSequence =
     messageSequence(existing) === null && messageSequence(incoming) !== null;
+  const learnedTranscriptPosition =
+    messageTranscriptPosition(existing) === null &&
+    messageTranscriptPosition(incoming) !== null;
   const needsOrderRefresh =
     learnedTimestamp ||
     clearedPending ||
     learnedSequence ||
+    learnedTranscriptPosition ||
     !!incoming.timestamp ||
-    messageSequence(incoming) !== null;
+    messageSequence(incoming) !== null ||
+    messageTranscriptPosition(incoming) !== null;
 
   return {
     ...existing,
@@ -351,6 +405,9 @@ function reconcileMessage(
     content_type: incoming.content_type,
     timestamp: incoming.timestamp ?? existing.timestamp,
     seq: incoming.seq ?? existing.seq,
+    transcript_offset:
+      incoming.transcript_offset ?? existing.transcript_offset ?? null,
+    transcript_index: incoming.transcript_index ?? existing.transcript_index ?? null,
     tool_name: incoming.tool_name ?? existing.tool_name,
     tool_input: incoming.tool_input ?? existing.tool_input,
     tool_use_id: incoming.tool_use_id ?? existing.tool_use_id,
@@ -364,10 +421,11 @@ function sortMessagesByKnownOrder(messages: ChatMessage[]): ChatMessage[] {
   return messages
     .map((message, index) => ({ message, index }))
     .sort((a, b) => {
-      const aSeq = messageSequence(a.message);
-      const bSeq = messageSequence(b.message);
-      if (aSeq !== null && bSeq !== null && aSeq !== bSeq) {
-        return aSeq - bSeq;
+      const aPosition = messageTranscriptPosition(a.message);
+      const bPosition = messageTranscriptPosition(b.message);
+      if (aPosition !== null && bPosition !== null) {
+        const positionCompare = compareTranscriptPositions(aPosition, bPosition);
+        if (positionCompare !== 0) return positionCompare;
       }
 
       const aTime = parseMessageTimestamp(a.message.timestamp);
@@ -376,9 +434,19 @@ function sortMessagesByKnownOrder(messages: ChatMessage[]): ChatMessage[] {
         return aTime - bTime;
       }
 
+      const aSeq = messageSequence(a.message);
+      const bSeq = messageSequence(b.message);
+      if (aSeq !== null && bSeq !== null && aSeq !== bSeq) {
+        return aSeq - bSeq;
+      }
+
       if (
-        aTime !== null &&
-        bTime !== null &&
+        (aPosition !== null ||
+          bPosition !== null ||
+          aTime !== null ||
+          bTime !== null ||
+          aSeq !== null ||
+          bSeq !== null) &&
         a.message._order !== b.message._order
       ) {
         return a.message._order - b.message._order;
@@ -420,8 +488,10 @@ function responseNewestTimestamp(
   return response.newest_timestamp ?? latestTimestamp(messages);
 }
 
-function timestampFromEvent(event: { timestamp?: string | null; ts: number }): string {
-  return event.timestamp || new Date(event.ts * 1000).toISOString();
+function timestampFromEvent(event: {
+  timestamp?: string | null;
+}): string | undefined {
+  return event.timestamp || undefined;
 }
 
 function agentSlashCommandsForRuntime(runtime: string): SlashCommandHint[] {
@@ -976,14 +1046,24 @@ export function ChatView({
       setHistoryLoaded(false);
     }
 
-    const refreshAfter =
+    const refreshAfterPosition =
+      cached && cachedMatches ? latestTranscriptPosition(cached.messages) : null;
+    const refreshAfterTimestamp =
       cached && cachedMatches ? cached.newestTimestamp || undefined : undefined;
+    const refreshOpts = refreshAfterPosition
+      ? {
+          after_offset: refreshAfterPosition.offset,
+          after_index: refreshAfterPosition.index,
+        }
+      : refreshAfterTimestamp
+        ? { after: refreshAfterTimestamp }
+        : undefined;
     api
-      .getMessages(windowId, refreshAfter ? { after: refreshAfter } : undefined)
+      .getMessages(windowId, refreshOpts)
       .then((r) => {
         if (cancelled) return;
         if (windowIdRef.current !== windowId) return;
-        if (refreshAfter) {
+        if (refreshOpts) {
           const cacheWasRebased =
             cached &&
             cached.historyVersion &&
@@ -1068,13 +1148,27 @@ export function ChatView({
   useEffect(() => {
     loadOlderRef.current = () => {
       if (loadingOlderRef.current || !hasMore) return;
-      const oldest = messages.find((m) => !!m.timestamp);
-      if (!oldest?.timestamp) return;
+      const oldestWithPosition = messages.find(
+        (m) => messageTranscriptPosition(m) !== null,
+      );
+      const oldestPosition = oldestWithPosition
+        ? messageTranscriptPosition(oldestWithPosition)
+        : null;
+      const oldestWithTimestamp = messages.find((m) => !!m.timestamp);
+      if (!oldestPosition && !oldestWithTimestamp?.timestamp) return;
       captureAnchor();
       loadingOlderRef.current = true;
       setLoadingOlder(true);
       api
-        .getMessages(session.window_id, { before: oldest.timestamp })
+        .getMessages(
+          session.window_id,
+          oldestPosition
+            ? {
+                before_offset: oldestPosition.offset,
+                before_index: oldestPosition.index,
+              }
+            : { before: oldestWithTimestamp?.timestamp },
+        )
         .then((r) => {
           setMessages((prev) => {
             const next = mergeAppendMessages(prev, r.messages);
@@ -1196,16 +1290,26 @@ export function ChatView({
       if (inflight) return;
       const wid = windowIdRef.current;
       if (!wid) return;
+      const lastPosition = latestTranscriptPosition(messagesRef.current);
       let lastTs = "";
       for (const m of messagesRef.current) {
         if (m.timestamp && m.timestamp > lastTs) lastTs = m.timestamp;
       }
       inflight = true;
       try {
-        const r = await api.getMessages(wid, {
-          after: lastTs || undefined,
-          limit: 500,
-        });
+        const r = await api.getMessages(
+          wid,
+          lastPosition
+            ? {
+                after_offset: lastPosition.offset,
+                after_index: lastPosition.index,
+                limit: 500,
+              }
+            : {
+                after: lastTs || undefined,
+                limit: 500,
+              },
+        );
         if (windowIdRef.current !== wid) return;
         if (r.messages.length === 0) return;
         setMessages((prev) => {
@@ -1286,6 +1390,8 @@ export function ChatView({
             content_type: event.content_type,
             timestamp: timestampFromEvent(event),
             seq: event.seq,
+            transcript_offset: event.transcript_offset,
+            transcript_index: event.transcript_index,
             tool_name: event.tool_name,
             tool_input: event.tool_input,
             tool_use_id: event.tool_use_id,

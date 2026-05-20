@@ -50,6 +50,8 @@ class ParsedEntry:
     image_data: list[tuple[str, bytes]] | None = (
         None  # For tool_result entries with images: (media_type, raw_bytes)
     )
+    transcript_offset: int | None = None
+    transcript_index: int | None = None
 
 
 @dataclass
@@ -77,6 +79,7 @@ class TranscriptParser:
     _NO_CONTENT_PLACEHOLDER = "(no content)"
     _INTERRUPTED_TEXT = "[Request interrupted by user for tool use]"
     _MAX_SUMMARY_LENGTH = 200
+    TRANSCRIPT_OFFSET_KEY = "__transcript_offset"
 
     @staticmethod
     def parse_line(line: str) -> dict | None:
@@ -96,6 +99,32 @@ class TranscriptParser:
             return json.loads(line)
         except json.JSONDecodeError:
             return None
+
+    @staticmethod
+    def _order_int(value: Any) -> int | None:
+        if isinstance(value, bool):
+            return None
+        if isinstance(value, int) and value >= 0:
+            return value
+        return None
+
+    @classmethod
+    def _get_transcript_offset(cls, data: dict) -> int | None:
+        return cls._order_int(data.get(cls.TRANSCRIPT_OFFSET_KEY))
+
+    @staticmethod
+    def _stamp_transcript_order(
+        result: list[ParsedEntry],
+        start_index: int,
+        transcript_offset: int | None,
+    ) -> None:
+        if transcript_offset is None:
+            return
+        for transcript_index, entry in enumerate(result[start_index:]):
+            if entry.transcript_offset is None:
+                entry.transcript_offset = transcript_offset
+            if entry.transcript_index is None:
+                entry.transcript_index = transcript_index
 
     @staticmethod
     def _extract_response_item_text_blocks(
@@ -716,6 +745,7 @@ class TranscriptParser:
             pending_tools = dict(pending_tools)  # don't mutate caller's dict
 
         for data in entries:
+            entry_offset = cls._get_transcript_offset(data)
             normalized = cls._normalize_entry_for_parsing(data)
             if normalized is None:
                 continue
@@ -734,6 +764,7 @@ class TranscriptParser:
             if not isinstance(content, list):
                 content = [{"type": "text", "text": str(content)}] if content else []
 
+            entry_start = len(result)
             parsed = cls.parse_message(data)
 
             # Handle local command messages first
@@ -763,6 +794,7 @@ class TranscriptParser:
                         )
                     )
                     last_cmd_name = None
+                    cls._stamp_transcript_order(result, entry_start, entry_offset)
                     continue
             last_cmd_name = None
 
@@ -1051,6 +1083,7 @@ class TranscriptParser:
                                 timestamp=entry_timestamp,
                             )
                         )
+            cls._stamp_transcript_order(result, entry_start, entry_offset)
 
         # Flush remaining pending tools at end.
         # In carry-over mode (monitor), keep them pending for the next call

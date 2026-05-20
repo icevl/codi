@@ -21,6 +21,8 @@ export interface SessionMessage {
   content_type: string;
   timestamp?: string;
   seq?: number;
+  transcript_offset?: number | null;
+  transcript_index?: number | null;
   tool_name?: string | null;
   tool_input?: Record<string, unknown> | null;
   tool_use_id?: string | null;
@@ -153,12 +155,32 @@ export const api = {
     ),
   getMessages: (
     windowId: string,
-    opts?: { before?: string; after?: string; limit?: number },
+    opts?: {
+      before?: string;
+      after?: string;
+      before_offset?: number;
+      before_index?: number;
+      after_offset?: number;
+      after_index?: number;
+      limit?: number;
+    },
   ) => {
     const params = new URLSearchParams();
     params.set("limit", String(opts?.limit ?? 500));
     if (opts?.before) params.set("before", opts.before);
     if (opts?.after) params.set("after", opts.after);
+    if (opts?.before_offset !== undefined) {
+      params.set("before_offset", String(opts.before_offset));
+    }
+    if (opts?.before_index !== undefined) {
+      params.set("before_index", String(opts.before_index));
+    }
+    if (opts?.after_offset !== undefined) {
+      params.set("after_offset", String(opts.after_offset));
+    }
+    if (opts?.after_index !== undefined) {
+      params.set("after_index", String(opts.after_index));
+    }
     return request<SessionMessagesResponse>(
       `/api/sessions/${encodeURIComponent(windowId)}/messages?${params.toString()}`,
     );
@@ -337,6 +359,8 @@ export type WsEvent =
       tool_use_id: string | null;
       turn_id: number | null;
       timestamp?: string | null;
+      transcript_offset?: number | null;
+      transcript_index?: number | null;
       ts: number;
       seq?: number;
     }
@@ -345,6 +369,8 @@ export type WsEvent =
       window_id: string;
       session_id: string;
       turn_id: number | null;
+      transcript_offset?: number | null;
+      transcript_index?: number | null;
       ts: number;
       seq?: number;
     }

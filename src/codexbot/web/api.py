@@ -9,7 +9,7 @@ Endpoints (all under `/api` unless stated):
   POST /api/sessions                 create new window (cwd, runtime[, resume])
   DELETE /api/sessions/{wid}         kill window
   PATCH  /api/sessions/{wid}         rename window
-  GET  /api/sessions/{wid}/messages?limit=N&before=ISO&after=ISO → paginated history
+  GET  /api/sessions/{wid}/messages?limit=N&before=ISO&after=ISO[&*_offset=N] → history
   GET  /api/sessions/{wid}/git       {is_repo, branch} for the pane's cwd
   GET  /api/sessions/{wid}/branches  {is_repo, current, branches[]} — local heads
   POST /api/sessions/{wid}/switch-branch {branch} — runs `git switch`
@@ -700,18 +700,45 @@ def create_app(
         limit: int = Query(500, ge=1, le=2000),
         before: str | None = Query(None),
         after: str | None = Query(None),
+        before_offset: int | None = Query(None, ge=0),
+        before_index: int | None = Query(None, ge=0),
+        after_offset: int | None = Query(None, ge=0),
+        after_index: int | None = Query(None, ge=0),
         _user: str = Depends(require_auth),
     ) -> dict[str, Any]:
         history = await session_manager.get_history_snapshot(window_id)
         all_messages = history.messages
         session = await session_manager.resolve_session_for_window(window_id)
 
+        def _order_value(message: dict[str, Any]) -> tuple[int, int] | None:
+            offset = message.get("transcript_offset")
+            index = message.get("transcript_index", 0)
+            if isinstance(offset, bool) or not isinstance(offset, int) or offset < 0:
+                return None
+            if isinstance(index, bool) or not isinstance(index, int) or index < 0:
+                index = 0
+            return offset, index
+
         # ISO timestamps compare lexicographically.
-        if before is not None:
+        if before_offset is not None:
+            cutoff_before = (before_offset, before_index or 0)
+            all_messages = [
+                m
+                for m in all_messages
+                if (order := _order_value(m)) is not None and order < cutoff_before
+            ]
+        elif before is not None:
             all_messages = [
                 m for m in all_messages if (m.get("timestamp") or "") < before
             ]
-        if after is not None:
+        if after_offset is not None:
+            cutoff_after = (after_offset, after_index or 0)
+            all_messages = [
+                m
+                for m in all_messages
+                if (order := _order_value(m)) is not None and order > cutoff_after
+            ]
+        elif after is not None:
             all_messages = [
                 m for m in all_messages if (m.get("timestamp") or "") > after
             ]

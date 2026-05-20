@@ -184,6 +184,62 @@ def test_get_messages_returns_history_metadata(
     }
 
 
+def test_get_messages_filters_by_transcript_order(
+    authed_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from codexbot.web import api as web_api
+
+    messages = [
+        {
+            "role": "assistant",
+            "text": "first",
+            "content_type": "text",
+            "timestamp": "2026-05-19T10:00:00Z",
+            "transcript_offset": 10,
+            "transcript_index": 0,
+        },
+        {
+            "role": "assistant",
+            "text": "second",
+            "content_type": "tool_use",
+            "timestamp": "2026-05-19T10:00:00Z",
+            "transcript_offset": 10,
+            "transcript_index": 1,
+        },
+        {
+            "role": "assistant",
+            "text": "third",
+            "content_type": "text",
+            "timestamp": "2026-05-19T10:00:00Z",
+            "transcript_offset": 20,
+            "transcript_index": 0,
+        },
+    ]
+    snapshot = HistorySnapshot(
+        messages=messages,
+        total_count=len(messages),
+        oldest_timestamp="2026-05-19T10:00:00Z",
+        newest_timestamp="2026-05-19T10:00:00Z",
+        history_version="20:456:3",
+    )
+    session = CodexSession("session-1", "hello", len(messages), "/tmp/session.jsonl")
+    monkeypatch.setattr(
+        web_api.session_manager,
+        "get_history_snapshot",
+        AsyncMock(return_value=snapshot),
+    )
+    monkeypatch.setattr(
+        web_api.session_manager,
+        "resolve_session_for_window",
+        AsyncMock(return_value=session),
+    )
+
+    r = authed_client.get("/api/sessions/@5/messages?after_offset=10&after_index=0")
+
+    assert r.status_code == 200, r.text
+    assert [m["text"] for m in r.json()["messages"]] == ["second", "third"]
+
+
 def test_get_slash_commands_returns_registry_response(
     authed_client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:

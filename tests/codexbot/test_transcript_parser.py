@@ -366,6 +366,23 @@ class TestParseEntries:
         assert result[0].role == "user"
         assert result[0].text == "Hi bot"
 
+    def test_transcript_order_metadata(self, make_jsonl_entry, make_text_block):
+        first = make_jsonl_entry(
+            "assistant", [make_text_block("one"), make_text_block("two")]
+        )
+        first[TranscriptParser.TRANSCRIPT_OFFSET_KEY] = 42
+        second = make_jsonl_entry("user", [make_text_block("three")])
+        second[TranscriptParser.TRANSCRIPT_OFFSET_KEY] = 99
+
+        result, pending = TranscriptParser.parse_entries([first, second])
+
+        assert pending == {}
+        assert [(e.text, e.transcript_offset, e.transcript_index) for e in result] == [
+            ("one", 42, 0),
+            ("two", 42, 1),
+            ("three", 99, 0),
+        ]
+
     def test_tool_use_and_result_pairing(
         self,
         make_jsonl_entry,

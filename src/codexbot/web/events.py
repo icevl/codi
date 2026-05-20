@@ -9,7 +9,8 @@ Event shapes (all dicts with `"type"` discriminator):
     {"type": "message", "window_id": "@12", "session_id": "...", "role": "...",
      "text": "...", "content_type": "text", "is_complete": true,
      "tool_name": "...", "tool_input": {...}, "tool_use_id": "...",
-     "timestamp": "2026-05-20T10:00:00Z", "ts": 1731600000.123, "seq": 1}
+     "timestamp": "2026-05-20T10:00:00Z", "transcript_offset": 123,
+     "transcript_index": 0, "ts": 1731600000.123, "seq": 1}
 
     {"type": "completion", "window_id": "@12", "session_id": "...",
      "turn_id": 3, "ts": ..., "seq": 2}
@@ -108,6 +109,8 @@ class EventBus:
             "tool_use_id": msg.tool_use_id,
             "turn_id": msg.turn_id,
             "timestamp": msg.timestamp,
+            "transcript_offset": msg.transcript_offset,
+            "transcript_index": msg.transcript_index,
         }
         await self.publish(payload)
 

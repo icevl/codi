@@ -54,6 +54,8 @@ async def test_publish_message_serializes_new_message() -> None:
         content_type="text",
         role="assistant",
         timestamp="2026-05-20T10:00:00Z",
+        transcript_offset=123,
+        transcript_index=1,
     )
     await bus.publish_message(msg, window_id="@7")
     event = await asyncio.wait_for(q.get(), timeout=0.5)
@@ -63,6 +65,8 @@ async def test_publish_message_serializes_new_message() -> None:
     assert event["role"] == "assistant"
     assert event["is_complete"] is True
     assert event["timestamp"] == "2026-05-20T10:00:00Z"
+    assert event["transcript_offset"] == 123
+    assert event["transcript_index"] == 1
 
 
 @pytest.mark.asyncio
