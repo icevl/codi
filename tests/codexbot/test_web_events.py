@@ -16,6 +16,21 @@ async def test_subscribe_receives_publish() -> None:
     event = await asyncio.wait_for(q.get(), timeout=0.5)
     assert event["type"] == "ping"
     assert "ts" in event
+    assert event["seq"] == 1
+
+
+@pytest.mark.asyncio
+async def test_publish_assigns_monotonic_sequence() -> None:
+    bus = EventBus()
+    q = bus.subscribe()
+
+    await bus.publish({"type": "first"})
+    await bus.publish({"type": "second"})
+
+    first = await asyncio.wait_for(q.get(), timeout=0.5)
+    second = await asyncio.wait_for(q.get(), timeout=0.5)
+    assert first["seq"] == 1
+    assert second["seq"] == 2
 
 
 @pytest.mark.asyncio
@@ -38,6 +53,7 @@ async def test_publish_message_serializes_new_message() -> None:
         message_type="content",
         content_type="text",
         role="assistant",
+        timestamp="2026-05-20T10:00:00Z",
     )
     await bus.publish_message(msg, window_id="@7")
     event = await asyncio.wait_for(q.get(), timeout=0.5)
@@ -46,6 +62,7 @@ async def test_publish_message_serializes_new_message() -> None:
     assert event["text"] == "hello"
     assert event["role"] == "assistant"
     assert event["is_complete"] is True
+    assert event["timestamp"] == "2026-05-20T10:00:00Z"
 
 
 @pytest.mark.asyncio

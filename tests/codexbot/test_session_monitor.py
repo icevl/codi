@@ -181,13 +181,13 @@ class TestSessionMonitorTurnLifecycle:
                 role="assistant",
                 text="answer",
                 content_type="text",
-                timestamp="",
+                timestamp="2026-05-20T10:00:00Z",
             ),
             ParsedEntry(
                 role="user",
                 text="next prompt",
                 content_type="text",
-                timestamp="",
+                timestamp="2026-05-20T10:00:01Z",
             ),
         ]
 
@@ -213,6 +213,7 @@ class TestSessionMonitorTurnLifecycle:
         assert messages[0].session_id == session_id
         assert messages[0].text == "answer"
         assert messages[0].message_type == "content"
+        assert messages[0].timestamp == "2026-05-20T10:00:00Z"
 
         completion_messages = [
             m

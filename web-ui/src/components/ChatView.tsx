@@ -109,7 +109,13 @@ function parseSlashCommand(text: string): string | null {
 }
 
 // Client-side _clientId keeps memo + anchor lookup stable across prepends.
-type ChatMessage = SessionMessage & { pending?: boolean; _clientId: string };
+// _order is the local arrival/history sequence used as a tie-breaker when
+// REST catch-up reconciles live WebSocket messages with transcript history.
+type ChatMessage = SessionMessage & {
+  pending?: boolean;
+  _clientId: string;
+  _order: number;
+};
 type HistoryCacheEntry = {
   messages: ChatMessage[];
   hasMore: boolean;
@@ -136,10 +142,21 @@ type ChoicePrompt = {
 
 const HISTORY_CACHE_MAX_WINDOWS = 8;
 const HISTORY_CACHE_MAX_MESSAGES = 2000;
+const BOTTOM_STICKY_THRESHOLD_PX = 48;
 
 let _clientIdCounter = 0;
+let _messageOrderCounter = 0;
+function nextMessageOrder(): number {
+  _messageOrderCounter += 1;
+  return _messageOrderCounter;
+}
+
 function attachKey(m: SessionMessage & { pending?: boolean }): ChatMessage {
-  return { ...m, _clientId: `m${++_clientIdCounter}` };
+  return {
+    ...m,
+    _clientId: `m${++_clientIdCounter}`,
+    _order: nextMessageOrder(),
+  };
 }
 
 function latestTimestamp(messages: SessionMessage[]): string | null {
@@ -267,13 +284,109 @@ function promptMessageKey(m: ChatMessage): string {
 function latestActiveChoiceMessageKey(messages: ChatMessage[]): string | null {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const m = messages[i];
-    if (m.pending) continue;
     if (m.role === "user" || m.content_type === "tool_result") return null;
+    if (m.pending) continue;
     const prompt = choicePromptForMessage(m);
     if (prompt) return promptMessageKey(m);
-    if (m.content_type === "tool_use") return null;
   }
   return null;
+}
+
+function parseMessageTimestamp(value: string | undefined): number | null {
+  if (!value) return null;
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
+function messageSequence(m: SessionMessage): number | null {
+  return typeof m.seq === "number" && Number.isFinite(m.seq) ? m.seq : null;
+}
+
+function findDuplicateMessageIndex(
+  messages: ChatMessage[],
+  incoming: SessionMessage,
+): number {
+  const incomingKey = messageContentKey(incoming);
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const existing = messages[i];
+    if (
+      existing.pending &&
+      incoming.role === "user" &&
+      existing.role === "user" &&
+      existing.text === incoming.text
+    ) {
+      return i;
+    }
+    if (messageContentKey(existing) !== incomingKey) continue;
+    if (
+      !existing.timestamp ||
+      !incoming.timestamp ||
+      existing.timestamp === incoming.timestamp
+    ) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+function reconcileMessage(
+  existing: ChatMessage,
+  incoming: SessionMessage,
+): ChatMessage {
+  const learnedTimestamp = !existing.timestamp && !!incoming.timestamp;
+  const clearedPending = !!existing.pending;
+  const learnedSequence =
+    messageSequence(existing) === null && messageSequence(incoming) !== null;
+  const needsOrderRefresh =
+    learnedTimestamp ||
+    clearedPending ||
+    learnedSequence ||
+    !!incoming.timestamp ||
+    messageSequence(incoming) !== null;
+
+  return {
+    ...existing,
+    role: incoming.role,
+    text: incoming.text,
+    content_type: incoming.content_type,
+    timestamp: incoming.timestamp ?? existing.timestamp,
+    seq: incoming.seq ?? existing.seq,
+    tool_name: incoming.tool_name ?? existing.tool_name,
+    tool_input: incoming.tool_input ?? existing.tool_input,
+    tool_use_id: incoming.tool_use_id ?? existing.tool_use_id,
+    pending: false,
+    _clientId: existing._clientId,
+    _order: needsOrderRefresh ? nextMessageOrder() : existing._order,
+  };
+}
+
+function sortMessagesByKnownOrder(messages: ChatMessage[]): ChatMessage[] {
+  return messages
+    .map((message, index) => ({ message, index }))
+    .sort((a, b) => {
+      const aSeq = messageSequence(a.message);
+      const bSeq = messageSequence(b.message);
+      if (aSeq !== null && bSeq !== null && aSeq !== bSeq) {
+        return aSeq - bSeq;
+      }
+
+      const aTime = parseMessageTimestamp(a.message.timestamp);
+      const bTime = parseMessageTimestamp(b.message.timestamp);
+      if (aTime !== null && bTime !== null && aTime !== bTime) {
+        return aTime - bTime;
+      }
+
+      if (
+        aTime !== null &&
+        bTime !== null &&
+        a.message._order !== b.message._order
+      ) {
+        return a.message._order - b.message._order;
+      }
+
+      return a.index - b.index;
+    })
+    .map(({ message }) => message);
 }
 
 function mergeAppendMessages(
@@ -281,24 +394,23 @@ function mergeAppendMessages(
   incoming: SessionMessage[],
 ): ChatMessage[] {
   if (incoming.length === 0) return current;
-  const seenExact = new Set<string>();
-  const seenContent = new Set<string>();
-  for (const m of current) {
-    const contentKey = messageContentKey(m);
-    seenContent.add(contentKey);
-    if (m.timestamp) seenExact.add(`${m.timestamp}|${contentKey}`);
+  let changed = false;
+  const next = current.slice();
+  for (const m of incoming) {
+    const duplicateIndex = findDuplicateMessageIndex(next, m);
+    if (duplicateIndex === -1) {
+      next.push(attachKey(m));
+      changed = true;
+      continue;
+    }
+    const reconciled = reconcileMessage(next[duplicateIndex], m);
+    if (reconciled !== next[duplicateIndex]) {
+      next[duplicateIndex] = reconciled;
+      changed = true;
+    }
   }
-  const fresh = incoming
-    .filter((m) => {
-      const contentKey = messageContentKey(m);
-      if (m.timestamp && seenExact.has(`${m.timestamp}|${contentKey}`)) {
-        return false;
-      }
-      if (!m.timestamp && seenContent.has(contentKey)) return false;
-      return true;
-    })
-    .map(attachKey);
-  return fresh.length > 0 ? [...current, ...fresh] : current;
+  if (!changed) return current;
+  return sortMessagesByKnownOrder(next);
 }
 
 function responseNewestTimestamp(
@@ -306,6 +418,10 @@ function responseNewestTimestamp(
   messages: SessionMessage[] = response.messages,
 ): string | null {
   return response.newest_timestamp ?? latestTimestamp(messages);
+}
+
+function timestampFromEvent(event: { timestamp?: string | null; ts: number }): string {
+  return event.timestamp || new Date(event.ts * 1000).toISOString();
 }
 
 function agentSlashCommandsForRuntime(runtime: string): SlashCommandHint[] {
@@ -544,11 +660,30 @@ export function ChatView({
     null,
   );
 
-  const scrollToLatest = useCallback(() => {
+  const snapToBottom = useCallback((behavior: ScrollBehavior = "auto") => {
     const el = scrollerRef.current;
     if (!el) return;
-    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    el.scrollTo({ top: el.scrollHeight, behavior });
   }, []);
+
+  const scheduleBottomSnap = useCallback(
+    (behavior: ScrollBehavior = "auto") => {
+      requestAnimationFrame(() => {
+        if (!stickToBottomRef.current) return;
+        snapToBottom(behavior);
+        requestAnimationFrame(() => {
+          if (stickToBottomRef.current) snapToBottom("auto");
+        });
+      });
+    },
+    [snapToBottom],
+  );
+
+  const scrollToLatest = useCallback(() => {
+    stickToBottomRef.current = true;
+    setAtBottom(true);
+    scheduleBottomSnap("smooth");
+  }, [scheduleBottomSnap]);
 
   // First bubble whose top is at-or-below the scroller's top edge.
   const captureAnchor = useCallback(() => {
@@ -626,6 +761,21 @@ export function ChatView({
   const activeChoiceMessageKey = useMemo(
     () => latestActiveChoiceMessageKey(messages),
     [messages],
+  );
+  const activeChoiceMessage = useMemo(
+    () =>
+      activeChoiceMessageKey
+        ? messages.find((m) => promptMessageKey(m) === activeChoiceMessageKey) ??
+          null
+        : null,
+    [activeChoiceMessageKey, messages],
+  );
+  const displayMessages = useMemo(
+    () =>
+      activeChoiceMessage
+        ? messages.filter((m) => m._clientId !== activeChoiceMessage._clientId)
+        : messages,
+    [activeChoiceMessage, messages],
   );
 
   useEffect(() => {
@@ -793,6 +943,10 @@ export function ChatView({
       !!cached &&
       (!expectedSessionId || !cached.sessionId || cached.sessionId === expectedSessionId);
 
+    stickToBottomRef.current = true;
+    setAtBottom(true);
+    pendingAnchorRef.current = null;
+
     if (cached && cachedMatches) {
       historyCacheRef.current.delete(windowId);
       historyCacheRef.current.set(windowId, cached);
@@ -801,6 +955,7 @@ export function ChatView({
       hasMoreRef.current = cached.hasMore;
       sessionIdRef.current = cached.sessionId ?? expectedSessionId;
       setHistoryLoaded(true);
+      scheduleBottomSnap();
     } else {
       if (cached) historyCacheRef.current.delete(windowId);
       setMessages([]);
@@ -840,6 +995,7 @@ export function ChatView({
                 newestTimestamp: responseNewestTimestamp(fresh),
                 historyVersion: fresh.history_version ?? null,
               });
+              scheduleBottomSnap();
             });
           }
           setMessages((prev) => {
@@ -854,6 +1010,7 @@ export function ChatView({
             });
             return next;
           });
+          scheduleBottomSnap();
         } else {
           const loaded = r.messages.map(attachKey);
           setMessages(loaded);
@@ -867,6 +1024,7 @@ export function ChatView({
             newestTimestamp: responseNewestTimestamp(r),
             historyVersion: r.history_version ?? null,
           });
+          scheduleBottomSnap();
         }
         sessionIdRef.current = r.session_id;
       })
@@ -881,7 +1039,13 @@ export function ChatView({
     return () => {
       cancelled = true;
     };
-  }, [session.session_id, session.window_id, showToast, storeHistoryCache]);
+  }, [
+    scheduleBottomSnap,
+    session.session_id,
+    session.window_id,
+    showToast,
+    storeHistoryCache,
+  ]);
 
   // Load history when session changes.
   useEffect(() => loadHistory(), [loadHistory]);
@@ -901,7 +1065,7 @@ export function ChatView({
         .getMessages(session.window_id, { before: oldest.timestamp })
         .then((r) => {
           setMessages((prev) => {
-            const next = [...r.messages.map(attachKey), ...prev];
+            const next = mergeAppendMessages(prev, r.messages);
             storeHistoryCache(session.window_id, {
               messages: next,
               hasMore: r.has_more,
@@ -954,7 +1118,7 @@ export function ChatView({
     const el = scrollerRef.current;
     if (!el) return;
     const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
-    const next = dist < 4;
+    const next = dist <= BOTTOM_STICKY_THRESHOLD_PX;
     stickToBottomRef.current = next;
     setAtBottom((prev) => (prev !== next ? next : prev));
   }, []);
@@ -963,7 +1127,8 @@ export function ChatView({
   useEffect(() => {
     stickToBottomRef.current = true;
     setAtBottom(true);
-  }, [session.window_id]);
+    scheduleBottomSnap();
+  }, [scheduleBottomSnap, session.window_id]);
 
   // Re-pin to bottom on deferred layout (images, fonts, keyboard close).
   // Anchoring above-viewport rows is intentionally absent — any
@@ -973,11 +1138,23 @@ export function ChatView({
     const el = scrollerRef.current;
     if (!list || !el) return;
     const ro = new ResizeObserver(() => {
-      if (stickToBottomRef.current) el.scrollTop = el.scrollHeight;
+      if (stickToBottomRef.current) scheduleBottomSnap();
     });
     ro.observe(list);
     return () => ro.disconnect();
-  }, [messages.length > 0]);
+  }, [messages.length > 0, scheduleBottomSnap]);
+
+  useEffect(() => {
+    const snapIfSticky = () => {
+      if (stickToBottomRef.current) scheduleBottomSnap();
+    };
+    window.addEventListener("resize", snapIfSticky);
+    window.visualViewport?.addEventListener("resize", snapIfSticky);
+    return () => {
+      window.removeEventListener("resize", snapIfSticky);
+      window.visualViewport?.removeEventListener("resize", snapIfSticky);
+    };
+  }, [scheduleBottomSnap]);
 
   // Top sentinel fires loadOlder as it slides into the overscan band.
   useEffect(() => {
@@ -1090,55 +1267,19 @@ export function ChatView({
       setStreaming(null);
 
       setMessages((prev) => {
-        let next: ChatMessage[];
-        // Replace optimistic echo in place; keep _clientId so DOM node is reused.
-        if (event.role === "user") {
-          const idx = prev.findIndex(
-            (m) => m.pending && m.role === "user" && m.text === event.text,
-          );
-          if (idx !== -1) {
-            next = prev.slice();
-            next[idx] = {
-              role: event.role,
-              text: event.text,
-              content_type: event.content_type,
-              tool_name: event.tool_name,
-              tool_input: event.tool_input,
-              tool_use_id: event.tool_use_id,
-              _clientId: prev[idx]._clientId,
-            };
-            storeHistoryCache(windowIdRef.current, {
-              messages: next,
-              hasMore: hasMoreRef.current,
-              sessionId: event.session_id,
-              newestTimestamp: latestTimestamp(next),
-            });
-            return next;
-          }
-        }
-        // Dedup against the recent tail: if the same (role, content_type,
-        // text) just landed via the initial /messages fetch or a prior WS
-        // event, don't append again. Scan a short window so identical
-        // messages from different turns aren't collapsed.
-        const tail = prev.slice(-30);
-        const dup = tail.some(
-          (m) =>
-            m.role === event.role &&
-            m.content_type === event.content_type &&
-            m.text === event.text,
-        );
-        if (dup) return prev;
-        next = [
-          ...prev,
-          attachKey({
+        const next = mergeAppendMessages(prev, [
+          {
             role: event.role,
             text: event.text,
             content_type: event.content_type,
+            timestamp: timestampFromEvent(event),
+            seq: event.seq,
             tool_name: event.tool_name,
             tool_input: event.tool_input,
             tool_use_id: event.tool_use_id,
-          }),
-        ];
+          },
+        ]);
+        if (next === prev) return prev;
         storeHistoryCache(windowIdRef.current, {
           messages: next,
           hasMore: hasMoreRef.current,
@@ -1405,6 +1546,7 @@ export function ChatView({
       // Snap to own send regardless of read position.
       stickToBottomRef.current = true;
       setAtBottom(true);
+      scheduleBottomSnap();
 
       // Clear composer immediately so sending feels instant. Restored on error.
       setText("");
@@ -1471,6 +1613,7 @@ export function ChatView({
       attachments,
       storeHistoryCache,
       closeSlashHints,
+      scheduleBottomSnap,
     ],
   );
 
@@ -1750,9 +1893,12 @@ export function ChatView({
                 )}
               </div>
             )}
-            {messages.map((m, index) => {
+            {displayMessages.map((m, index) => {
               const isFirst = !hasMore && index === 0;
-              const isLast = index === messages.length - 1 && !streaming;
+              const isLast =
+                index === displayMessages.length - 1 &&
+                !streaming &&
+                !activeChoiceMessage;
               const choicePrompt = choicePromptForMessage(m) ?? undefined;
               const choiceKey = choicePrompt ? promptMessageKey(m) : null;
               const isActiveChoice = choiceKey === activeChoiceMessageKey;
@@ -1779,8 +1925,34 @@ export function ChatView({
               );
             })}
             {streaming && (
-              <div className="messages-row messages-row-last">
+              <div
+                className={
+                  "messages-row" +
+                  (!activeChoiceMessage ? " messages-row-last" : "")
+                }
+              >
                 <StreamingBubble text={streaming.text} status={streaming.status} />
+              </div>
+            )}
+            {activeChoiceMessage && (
+              <div
+                key={activeChoiceMessage._clientId}
+                data-msg-key={activeChoiceMessage._clientId}
+                className="messages-row messages-row-last"
+              >
+                <MessageBubble
+                  m={activeChoiceMessage}
+                  choicePrompt={
+                    choicePromptForMessage(activeChoiceMessage) ?? undefined
+                  }
+                  choicePending={
+                    promptMessageKey(activeChoiceMessage) === choiceSendingKey
+                  }
+                  choiceDisabled={false}
+                  onSelectChoice={(option) =>
+                    handleChoiceSelect(activeChoiceMessage, option)
+                  }
+                />
               </div>
             )}
           </div>

@@ -20,6 +20,7 @@ export interface SessionMessage {
   text: string;
   content_type: string;
   timestamp?: string;
+  seq?: number;
   tool_name?: string | null;
   tool_input?: Record<string, unknown> | null;
   tool_use_id?: string | null;
@@ -335,7 +336,9 @@ export type WsEvent =
       tool_input: Record<string, unknown> | null;
       tool_use_id: string | null;
       turn_id: number | null;
+      timestamp?: string | null;
       ts: number;
+      seq?: number;
     }
   | {
       type: "completion";
@@ -343,6 +346,7 @@ export type WsEvent =
       session_id: string;
       turn_id: number | null;
       ts: number;
+      seq?: number;
     }
   | {
       type: "stream";
@@ -351,14 +355,16 @@ export type WsEvent =
       text: string;
       status: string;
       ts: number;
+      seq?: number;
     }
   | {
       type: "stream_end";
       window_id: string;
       session_id: string | null;
       ts: number;
+      seq?: number;
     }
-  | { type: "sessions_changed"; ts: number }
+  | { type: "sessions_changed"; ts: number; seq?: number }
   | {
       type: "slash_commands_changed";
       runtime: string;
@@ -366,6 +372,7 @@ export type WsEvent =
       session_id: string;
       source: string;
       ts: number;
+      seq?: number;
     }
   | {
       type: "update_available";
@@ -373,4 +380,5 @@ export type WsEvent =
       latest_sha: string;
       subject: string;
       ts: number;
+      seq?: number;
     };

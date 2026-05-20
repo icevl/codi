@@ -9,12 +9,12 @@ Event shapes (all dicts with `"type"` discriminator):
     {"type": "message", "window_id": "@12", "session_id": "...", "role": "...",
      "text": "...", "content_type": "text", "is_complete": true,
      "tool_name": "...", "tool_input": {...}, "tool_use_id": "...",
-     "ts": 1731600000.123}
+     "timestamp": "2026-05-20T10:00:00Z", "ts": 1731600000.123, "seq": 1}
 
     {"type": "completion", "window_id": "@12", "session_id": "...",
-     "turn_id": 3, "ts": ...}
+     "turn_id": 3, "ts": ..., "seq": 2}
 
-    {"type": "sessions_changed", "ts": ...}
+    {"type": "sessions_changed", "ts": ..., "seq": 3}
 """
 
 from __future__ import annotations
@@ -38,6 +38,7 @@ class EventBus:
         self._subscribers: set[asyncio.Queue[dict[str, Any]]] = set()
         self._queue_size = queue_size
         self._closed = False
+        self._next_seq = 1
 
     def subscribe(self) -> asyncio.Queue[dict[str, Any]]:
         q: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=self._queue_size)
@@ -78,6 +79,8 @@ class EventBus:
         if self._closed:
             return
         event.setdefault("ts", time.time())
+        event.setdefault("seq", self._next_seq)
+        self._next_seq += 1
         dead: list[asyncio.Queue[dict[str, Any]]] = []
         for q in self._subscribers:
             try:
@@ -104,6 +107,7 @@ class EventBus:
             "tool_input": msg.tool_input,
             "tool_use_id": msg.tool_use_id,
             "turn_id": msg.turn_id,
+            "timestamp": msg.timestamp,
         }
         await self.publish(payload)
 

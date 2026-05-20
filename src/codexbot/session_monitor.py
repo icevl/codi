@@ -61,6 +61,7 @@ class NewMessage:
     tool_name: str | None = None
     tool_input: dict[str, Any] | None = None
     image_data: list[tuple[str, bytes]] | None = None
+    timestamp: str | None = None
 
 
 @dataclass
@@ -496,6 +497,7 @@ class SessionMonitor:
                             tool_name=entry.tool_name,
                             tool_input=entry.tool_input,
                             image_data=entry.image_data,
+                            timestamp=entry.timestamp,
                         )
                     )
                     if stale_completion:
