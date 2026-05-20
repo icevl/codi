@@ -29,6 +29,31 @@ def _message_entry(role: str, text: str, timestamp: str) -> dict:
     }
 
 
+def _tool_use_entry(
+    name: str,
+    input_data: dict,
+    timestamp: str,
+    *,
+    tool_id: str = "tool-1",
+) -> dict:
+    return {
+        "type": "assistant",
+        "timestamp": timestamp,
+        "message": {
+            "content": [
+                {
+                    "type": "tool_use",
+                    "id": tool_id,
+                    "name": name,
+                    "input": input_data,
+                }
+            ]
+        },
+        "sessionId": "session-1",
+        "cwd": "/tmp",
+    }
+
+
 def _write_transcript(path, *entries: dict) -> None:
     path.write_text(
         "".join(json.dumps(entry, ensure_ascii=False) + "\n" for entry in entries),
@@ -240,6 +265,49 @@ class TestHistoryCache:
         assert [m["text"] for m in first.messages] == ["hello"]
         assert [m["text"] for m in second.messages] == ["hello"]
         assert parse_entries.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_history_snapshot_preserves_tool_metadata(
+        self,
+        mgr: SessionManager,
+        tmp_path,
+    ) -> None:
+        transcript = tmp_path / "session.jsonl"
+        tool_input = {
+            "questions": [
+                {
+                    "question": "Choose rollout mode",
+                    "options": [{"label": "Canary"}, {"label": "All users"}],
+                }
+            ]
+        }
+        _write_transcript(
+            transcript,
+            _tool_use_entry(
+                "request_user_input",
+                tool_input,
+                "2026-05-19T10:00:00Z",
+                tool_id="prompt-1",
+            ),
+        )
+        session = CodexSession("session-1", "", 1, str(transcript))
+
+        with patch.object(
+            mgr,
+            "resolve_session_for_window",
+            new=AsyncMock(return_value=session),
+        ):
+            snapshot = await mgr.get_history_snapshot("@1")
+
+        prompt_messages = [
+            message
+            for message in snapshot.messages
+            if message["content_type"] == "tool_use"
+        ]
+        assert prompt_messages
+        assert prompt_messages[0]["tool_name"] == "request_user_input"
+        assert prompt_messages[0]["tool_input"] == tool_input
+        assert prompt_messages[0]["tool_use_id"] == "prompt-1"
 
     @pytest.mark.asyncio
     async def test_history_snapshot_reads_only_appended_tail(

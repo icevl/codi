@@ -127,6 +127,16 @@ type SlashTokenRange = {
   end: number;
   query: string;
 };
+type ChoicePromptOption = {
+  label: string;
+  description: string;
+  value: string;
+};
+type ChoicePrompt = {
+  kind: "plan" | "request";
+  title: string;
+  options: ChoicePromptOption[];
+};
 
 const HISTORY_CACHE_MAX_WINDOWS = 8;
 const HISTORY_CACHE_MAX_MESSAGES = 2000;
@@ -152,7 +162,122 @@ function firstTimestamp(messages: SessionMessage[]): string | null {
 }
 
 function messageContentKey(m: SessionMessage): string {
-  return `${m.role}|${m.content_type}|${m.text}`;
+  const toolKey = m.tool_use_id || m.tool_name || "";
+  return `${m.role}|${m.content_type}|${toolKey}|${m.text}`;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function stringValue(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function hasBlockingPromptFlag(value: Record<string, unknown>): boolean {
+  return ["isOther", "is_other", "isSecret", "is_secret"].some((key) =>
+    Boolean(value[key]),
+  );
+}
+
+function normalizePromptOptions(
+  rawOptions: unknown,
+): ChoicePromptOption[] | null {
+  if (!Array.isArray(rawOptions)) return null;
+  const options: ChoicePromptOption[] = [];
+  for (const item of rawOptions) {
+    let label = "";
+    let description = "";
+    if (typeof item === "string") {
+      label = item.trim();
+    } else if (isRecord(item)) {
+      if (hasBlockingPromptFlag(item)) return null;
+      for (const key of ["label", "title", "name", "value", "text"]) {
+        label = stringValue(item[key]);
+        if (label) break;
+      }
+      description = stringValue(item.description);
+    }
+    if (!label) continue;
+    if (label.toLowerCase() === "other") return null;
+    options.push({
+      label,
+      description,
+      value: String(options.length + 1),
+    });
+  }
+  return options.length > 0 ? options : null;
+}
+
+function choicePromptForMessage(m: SessionMessage): ChoicePrompt | null {
+  if (m.role !== "assistant" || m.content_type !== "tool_use") return null;
+  const toolName = m.tool_name ?? "";
+
+  if (toolName === "ExitPlanMode" || toolName === "exit_plan_mode") {
+    return {
+      kind: "plan",
+      title: "Plan decision",
+      options: [
+        {
+          label: "Yes, implement this plan",
+          description: "Switch to Default and start coding.",
+          value: "1",
+        },
+        {
+          label: "No, stay in Plan mode",
+          description: "Continue planning with the model.",
+          value: "2",
+        },
+      ],
+    };
+  }
+
+  if (toolName !== "request_user_input" && toolName !== "AskUserQuestion") {
+    return null;
+  }
+  if (!isRecord(m.tool_input) || hasBlockingPromptFlag(m.tool_input)) {
+    return null;
+  }
+
+  let title = "";
+  let rawOptions: unknown;
+  const questions = m.tool_input.questions;
+  if (Array.isArray(questions)) {
+    if (questions.length !== 1) return null;
+    const question = questions[0];
+    if (!isRecord(question) || hasBlockingPromptFlag(question)) return null;
+    title = stringValue(question.question);
+    rawOptions = question.options;
+  }
+
+  if (!title) {
+    title =
+      stringValue(m.tool_input.question) ||
+      stringValue(m.tool_input.prompt) ||
+      stringValue(m.tool_input.title);
+  }
+  rawOptions ??=
+    m.tool_input.options ?? m.tool_input.choices ?? m.tool_input.items;
+
+  const options = normalizePromptOptions(rawOptions);
+  if (!title || !options) return null;
+  return { kind: "request", title, options };
+}
+
+function promptMessageKey(m: ChatMessage): string {
+  return `${m.tool_use_id || "tool"}:${m._clientId}`;
+}
+
+function latestActiveChoiceMessageKey(messages: ChatMessage[]): string | null {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const m = messages[i];
+    if (m.pending) continue;
+    if (m.role === "user" || m.content_type === "tool_result") return null;
+    const prompt = choicePromptForMessage(m);
+    if (prompt) return promptMessageKey(m);
+    if (m.content_type === "tool_use") return null;
+  }
+  return null;
 }
 
 function mergeAppendMessages(
@@ -256,8 +381,16 @@ function formatMessageTime(iso: string | undefined): {
 // Markdown each time and large chats would lock the main thread.
 const MessageBubble = memo(function MessageBubble({
   m,
+  choicePrompt,
+  choicePending = false,
+  choiceDisabled = false,
+  onSelectChoice,
 }: {
   m: ChatMessage;
+  choicePrompt?: ChoicePrompt;
+  choicePending?: boolean;
+  choiceDisabled?: boolean;
+  onSelectChoice?: (option: ChoicePromptOption) => void;
 }) {
   const t = formatMessageTime(m.timestamp);
   const isUser = m.role === "user" && m.content_type !== "tool_result";
@@ -284,6 +417,32 @@ const MessageBubble = memo(function MessageBubble({
           )}
         </div>
         <Markdown text={m.text} />
+        {choicePrompt && onSelectChoice && (
+          <div className={`choice-panel ${choicePrompt.kind}`}>
+            <div className="choice-panel-title">{choicePrompt.title}</div>
+            <div className="choice-options">
+              {choicePrompt.options.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  className="choice-option"
+                  disabled={choiceDisabled || choicePending}
+                  onClick={() => onSelectChoice(option)}
+                >
+                  <span className="choice-option-index">{option.value}</span>
+                  <span className="choice-option-text">
+                    <span className="choice-option-label">{option.label}</span>
+                    {option.description && (
+                      <span className="choice-option-description">
+                        {option.description}
+                      </span>
+                    )}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -353,6 +512,7 @@ export function ChatView({
   const [text, setText] = useState("");
   const [slashRange, setSlashRange] = useState<SlashTokenRange | null>(null);
   const [slashActiveIndex, setSlashActiveIndex] = useState(0);
+  const [choiceSendingKey, setChoiceSendingKey] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState(session.name);
@@ -441,12 +601,22 @@ export function ChatView({
     );
   }, [agentSlashCommands, slashRange]);
   const showSlashHints = slashRange !== null && slashHints.length > 0;
+  const activeChoiceMessageKey = useMemo(
+    () => latestActiveChoiceMessageKey(messages),
+    [messages],
+  );
 
   useEffect(() => {
     setSlashActiveIndex((idx) =>
       slashHints.length === 0 ? 0 : Math.min(idx, slashHints.length - 1),
     );
   }, [slashHints.length]);
+
+  useEffect(() => {
+    if (choiceSendingKey && choiceSendingKey !== activeChoiceMessageKey) {
+      setChoiceSendingKey(null);
+    }
+  }, [activeChoiceMessageKey, choiceSendingKey]);
 
   const refreshSlashHints = useCallback(
     (value: string, selectionStart: number | null | undefined) => {
@@ -537,6 +707,7 @@ export function ChatView({
     setNameDraft(session.name);
     setEditingName(false);
     setStreaming(null);
+    setChoiceSendingKey(null);
     closeSlashHints();
     setAttachments((prev) => {
       for (const a of prev) URL.revokeObjectURL(a.previewUrl);
@@ -900,6 +1071,9 @@ export function ChatView({
               role: event.role,
               text: event.text,
               content_type: event.content_type,
+              tool_name: event.tool_name,
+              tool_input: event.tool_input,
+              tool_use_id: event.tool_use_id,
               _clientId: prev[idx]._clientId,
             };
             storeHistoryCache(windowIdRef.current, {
@@ -929,6 +1103,9 @@ export function ChatView({
             role: event.role,
             text: event.text,
             content_type: event.content_type,
+            tool_name: event.tool_name,
+            tool_input: event.tool_input,
+            tool_use_id: event.tool_use_id,
           }),
         ];
         storeHistoryCache(windowIdRef.current, {
@@ -1131,6 +1308,20 @@ export function ChatView({
       loadHistory,
       showToast,
     ],
+  );
+
+  const handleChoiceSelect = useCallback(
+    async (m: ChatMessage, option: ChoicePromptOption) => {
+      const key = promptMessageKey(m);
+      setChoiceSendingKey(key);
+      try {
+        await api.sendText(session.window_id, option.value, true);
+      } catch (err) {
+        setChoiceSendingKey((current) => (current === key ? null : current));
+        showToast((err as Error).message, "error");
+      }
+    },
+    [session.window_id, showToast],
   );
 
   const send = useCallback(
@@ -1531,6 +1722,9 @@ export function ChatView({
             {messages.map((m, index) => {
               const isFirst = !hasMore && index === 0;
               const isLast = index === messages.length - 1 && !streaming;
+              const choicePrompt = choicePromptForMessage(m) ?? undefined;
+              const choiceKey = choicePrompt ? promptMessageKey(m) : null;
+              const isActiveChoice = choiceKey === activeChoiceMessageKey;
               const cls =
                 "messages-row" +
                 (isFirst ? " messages-row-first" : "") +
@@ -1541,7 +1735,15 @@ export function ChatView({
                   data-msg-key={m._clientId}
                   className={cls}
                 >
-                  <MessageBubble m={m} />
+                  <MessageBubble
+                    m={m}
+                    choicePrompt={isActiveChoice ? choicePrompt : undefined}
+                    choicePending={choiceKey === choiceSendingKey}
+                    choiceDisabled={
+                      choiceSendingKey !== null && choiceKey !== choiceSendingKey
+                    }
+                    onSelectChoice={(option) => handleChoiceSelect(m, option)}
+                  />
                 </div>
               );
             })}

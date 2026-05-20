@@ -140,8 +140,18 @@ def test_get_messages_returns_history_metadata(
             {
                 "role": "assistant",
                 "text": "hello",
-                "content_type": "text",
+                "content_type": "tool_use",
                 "timestamp": "2026-05-19T10:00:00Z",
+                "tool_name": "request_user_input",
+                "tool_input": {
+                    "questions": [
+                        {
+                            "question": "Choose rollout mode",
+                            "options": [{"label": "Canary"}],
+                        }
+                    ]
+                },
+                "tool_use_id": "prompt-1",
             }
         ],
         total_count=1,

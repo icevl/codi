@@ -20,6 +20,9 @@ export interface SessionMessage {
   text: string;
   content_type: string;
   timestamp?: string;
+  tool_name?: string | null;
+  tool_input?: Record<string, unknown> | null;
+  tool_use_id?: string | null;
 }
 
 export interface SessionMessagesResponse {

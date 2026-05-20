@@ -1082,15 +1082,7 @@ class SessionManager:
             return [], 0
 
         parsed_entries, _ = TranscriptParser.parse_entries(entries)
-        messages = [
-            {
-                "role": e.role,
-                "text": e.text,
-                "content_type": e.content_type,
-                "timestamp": e.timestamp,
-            }
-            for e in parsed_entries
-        ]
+        messages = _messages_from_parsed(parsed_entries)
         return messages, len(messages)
 
     async def get_history_snapshot(self, window_id: str) -> HistorySnapshot:
@@ -1207,15 +1199,22 @@ class SessionManager:
 
 
 def _messages_from_parsed(parsed_entries: list[Any]) -> list[dict[str, Any]]:
-    return [
-        {
+    messages: list[dict[str, Any]] = []
+    for e in parsed_entries:
+        message: dict[str, Any] = {
             "role": e.role,
             "text": e.text,
             "content_type": e.content_type,
             "timestamp": e.timestamp,
         }
-        for e in parsed_entries
-    ]
+        if getattr(e, "tool_name", None) is not None:
+            message["tool_name"] = e.tool_name
+        if getattr(e, "tool_input", None) is not None:
+            message["tool_input"] = e.tool_input
+        if getattr(e, "tool_use_id", None) is not None:
+            message["tool_use_id"] = e.tool_use_id
+        messages.append(message)
+    return messages
 
 
 def _first_timestamp(messages: list[dict[str, Any]]) -> str | None:
