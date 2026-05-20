@@ -340,11 +340,13 @@ def create_app(
         response.headers.setdefault("Referrer-Policy", "no-referrer")
         response.headers.setdefault(
             "Content-Security-Policy",
-            "default-src 'self'; img-src 'self' data: blob:; "
+            "default-src 'self'; img-src 'self' data: blob: https://*.tunio.ai; "
             "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
             "font-src 'self' https://fonts.gstatic.com; "
             "script-src 'self'; "
-            "connect-src 'self' ws: wss:; frame-ancestors 'none'",
+            "connect-src 'self' ws: wss: https://*.tunio.ai; "
+            "media-src 'self' blob: https://*.tunio.ai; "
+            "frame-ancestors 'none'",
         )
         return response
 

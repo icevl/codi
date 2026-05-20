@@ -1899,6 +1899,31 @@ button.burger {
   margin: 0;
 }
 
+/* Codexbot's global `button` rule (top of this file) adds padding/border to
+   every button. Strip those inside tunio-player so the progress ring on the
+   play button isn't squashed by extra padding. */
+.tunio-player button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  transition: none;
+}
+
+/* Sidebar button-only player — match the neighbouring icon-button look. */
+.tunio-player .codi-sidebar-play {
+  background-color: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-0);
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+
+.tunio-player .codi-sidebar-play:hover {
+  background-color: var(--bg-3);
+  border-color: var(--border-strong);
+}
+
 .office-loader {
   position: absolute;
   inset: 0;
