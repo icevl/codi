@@ -32,6 +32,7 @@ import {
   SessionMessage,
   SessionMessagesResponse,
   SessionSummary,
+  SkillHint,
   SlashCommandHint,
   WsEvent,
 } from "../api";
@@ -129,6 +130,7 @@ type TranscriptPosition = {
   index: number;
 };
 type SlashTokenRange = {
+  trigger: "/" | "$";
   start: number;
   end: number;
   query: string;
@@ -521,9 +523,15 @@ function slashTokenRange(
   const tokenEnd =
     nextWhitespace === -1 ? value.length : caret + nextWhitespace;
   const token = value.slice(tokenStart, tokenEnd);
-  if (!token.startsWith("/")) return null;
-  if (token.includes("@")) return null;
+  const trigger = token.startsWith("/")
+    ? "/"
+    : token.startsWith("$")
+      ? "$"
+      : null;
+  if (!trigger) return null;
+  if (trigger === "/" && token.includes("@")) return null;
   return {
+    trigger,
     start: tokenStart,
     end: tokenEnd,
     query: token.slice(1).toLowerCase(),
@@ -799,6 +807,7 @@ export function ChatView({
   );
   const [agentSlashCommands, setAgentSlashCommands] =
     useState<SlashCommandHint[]>(fallbackSlashCommands);
+  const [agentSkillHints, setAgentSkillHints] = useState<SkillHint[]>([]);
 
   const loadSlashCommands = useCallback(async () => {
     const runtime = session.runtime;
@@ -821,14 +830,50 @@ export function ChatView({
     void loadSlashCommands();
   }, [loadSlashCommands]);
 
+  const loadSkillHints = useCallback(async () => {
+    const runtime = session.runtime;
+    const windowId = session.window_id;
+    if (runtime !== "codex") {
+      setAgentSkillHints([]);
+      return;
+    }
+    try {
+      const response = await api.listSkillHints(runtime, windowId);
+      if (windowIdRef.current !== windowId) return;
+      setAgentSkillHints(response.skills);
+    } catch {
+      if (windowIdRef.current === windowId) {
+        setAgentSkillHints([]);
+      }
+    }
+  }, [session.runtime, session.window_id]);
+
+  useEffect(() => {
+    void loadSkillHints();
+  }, [loadSkillHints]);
+
   const slashHints = useMemo(() => {
     if (!slashRange) return [];
+    if (slashRange.trigger === "$") {
+      if (session.runtime !== "codex") return [];
+      const prefix = `$${slashRange.query}`;
+      return agentSkillHints
+        .map((hint) => ({
+          command: hint.invocation,
+          description: hint.description,
+        }))
+        .filter((hint) => hint.command.toLowerCase().startsWith(prefix));
+    }
     const prefix = `/${slashRange.query}`;
     return agentSlashCommands.filter((hint) =>
       hint.command.toLowerCase().startsWith(prefix),
     );
-  }, [agentSlashCommands, slashRange]);
+  }, [agentSkillHints, agentSlashCommands, session.runtime, slashRange]);
   const showSlashHints = slashRange !== null && slashHints.length > 0;
+  const composerHintLabel =
+    slashRange?.trigger === "$"
+      ? "Codex skills"
+      : `${session.runtime === "claude" ? "Claude" : "Codex"} commands`;
   const activeChoiceMessageKey = useMemo(
     () => latestActiveChoiceMessageKey(messages),
     [messages],
@@ -1365,6 +1410,15 @@ export function ChatView({
         }
         return;
       }
+      if (event.type === "skill_hints_changed") {
+        if (
+          event.window_id === windowIdRef.current ||
+          event.runtime === session.runtime
+        ) {
+          void loadSkillHints();
+        }
+        return;
+      }
       if (event.type === "stream") {
         if (!isCurrentSession(event)) return;
         setStreaming({ text: event.text, status: event.status });
@@ -1407,7 +1461,13 @@ export function ChatView({
         return next;
       });
     });
-  }, [loadSlashCommands, session.runtime, storeHistoryCache, subscribeWs]);
+  }, [
+    loadSkillHints,
+    loadSlashCommands,
+    session.runtime,
+    storeHistoryCache,
+    subscribeWs,
+  ]);
 
   // Poll git branch for the current window. The pane cwd can drift if the
   // user `cd`s inside the shell, and there's no event for that, so polling
@@ -2117,12 +2177,10 @@ export function ChatView({
             id="slash-command-hints"
             className="slash-hints"
             role="listbox"
-            aria-label={`${session.runtime === "claude" ? "Claude" : "Codex"} slash commands`}
+            aria-label={composerHintLabel}
             onMouseDown={(e) => e.preventDefault()}
           >
-            <div className="slash-hints-label">
-              {session.runtime === "claude" ? "Claude" : "Codex"} commands
-            </div>
+            <div className="slash-hints-label">{composerHintLabel}</div>
             {slashHints.map((hint, index) => (
               <button
                 key={hint.command}

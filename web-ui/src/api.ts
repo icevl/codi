@@ -58,6 +58,21 @@ export interface SlashCommandsResponse {
   updated_at: number | null;
 }
 
+export interface SkillHint {
+  name: string;
+  invocation: string;
+  description: string;
+}
+
+export interface SkillHintsResponse {
+  runtime: string;
+  window_id: string | null;
+  session_id: string | null;
+  skills: SkillHint[];
+  source: string;
+  updated_at: number | null;
+}
+
 export interface DirectoryEntry {
   name: string;
   path: string;
@@ -253,6 +268,12 @@ export const api = {
       `/api/slash-commands?${params.toString()}`,
     );
   },
+  listSkillHints: (runtime: string, windowId?: string | null) => {
+    const params = new URLSearchParams();
+    params.set("runtime", runtime);
+    if (windowId) params.set("window_id", windowId);
+    return request<SkillHintsResponse>(`/api/skill-hints?${params.toString()}`);
+  },
   listSkills: (runtime: string) =>
     request<{ skills: string[]; runtime: string }>(
       `/api/skills?runtime=${encodeURIComponent(runtime)}`,
@@ -399,6 +420,15 @@ export type WsEvent =
   | { type: "sessions_changed"; ts: number; seq?: number }
   | {
       type: "slash_commands_changed";
+      runtime: string;
+      window_id: string;
+      session_id: string;
+      source: string;
+      ts: number;
+      seq?: number;
+    }
+  | {
+      type: "skill_hints_changed";
       runtime: string;
       window_id: string;
       session_id: string;

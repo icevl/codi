@@ -15,7 +15,10 @@ Event shapes (all dicts with `"type"` discriminator):
     {"type": "completion", "window_id": "@12", "session_id": "...",
      "turn_id": 3, "ts": ..., "seq": 2}
 
-    {"type": "sessions_changed", "ts": ..., "seq": 3}
+    {"type": "skill_hints_changed", "runtime": "codex", "window_id": "@12",
+     "session_id": "...", "source": "transcript", "ts": ..., "seq": 3}
+
+    {"type": "sessions_changed", "ts": ..., "seq": 4}
 """
 
 from __future__ import annotations

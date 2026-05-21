@@ -9,6 +9,7 @@ not exercised here.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock
 
@@ -422,6 +423,102 @@ def test_get_slash_commands_returns_registry_response(
     assert calls == [
         {"runtime": "claude", "window_id": "@5", "session_id": "session-1"}
     ]
+
+
+def test_get_skill_hints_uses_active_codex_window_session(
+    authed_client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from codexbot.skill_hints import SkillHint, SkillHintSet
+    from codexbot.web import api as web_api
+
+    transcript = tmp_path / "session.jsonl"
+    transcript.write_text("", encoding="utf-8")
+    monkeypatch.setattr(
+        web_api.session_manager,
+        "window_states",
+        {"@55": WindowState(session_id="session-55", runtime="codex")},
+    )
+    monkeypatch.setattr(
+        web_api.session_manager,
+        "_session_index",
+        {"session-55": transcript},
+    )
+    refresh = AsyncMock()
+    monkeypatch.setattr(web_api.session_manager, "_refresh_sessions_index", refresh)
+    calls: list[dict[str, Any]] = []
+
+    async def fake_discover_now(**kwargs: Any) -> SkillHintSet:
+        calls.append(kwargs)
+        return SkillHintSet(
+            runtime="codex",
+            window_id="@55",
+            session_id="session-55",
+            source="transcript",
+            updated_at=1.0,
+            skills=[
+                SkillHint(
+                    name="gsd-fast",
+                    invocation="$gsd-fast",
+                    description="Execute quickly",
+                )
+            ],
+        )
+
+    monkeypatch.setattr(
+        web_api.skill_hint_registry,
+        "discover_now",
+        fake_discover_now,
+    )
+
+    r = authed_client.get("/api/skill-hints?runtime=codex&window_id=@55")
+
+    assert r.status_code == 200, r.text
+    assert r.json() == {
+        "runtime": "codex",
+        "window_id": "@55",
+        "session_id": "session-55",
+        "skills": [
+            {
+                "name": "gsd-fast",
+                "invocation": "$gsd-fast",
+                "description": "Execute quickly",
+            }
+        ],
+        "source": "transcript",
+        "updated_at": 1.0,
+    }
+    refresh.assert_awaited_once_with(force=True)
+    assert calls == [
+        {
+            "runtime": "codex",
+            "window_id": "@55",
+            "session_id": "session-55",
+            "transcript_path": transcript,
+            "publish": False,
+        }
+    ]
+
+
+def test_get_skill_hints_returns_empty_for_claude_window(
+    authed_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from codexbot.web import api as web_api
+
+    monkeypatch.setattr(
+        web_api.session_manager,
+        "window_states",
+        {"@56": WindowState(session_id="session-56", runtime="claude")},
+    )
+    refresh = AsyncMock()
+    monkeypatch.setattr(web_api.session_manager, "_refresh_sessions_index", refresh)
+
+    r = authed_client.get("/api/skill-hints?runtime=codex&window_id=@56")
+
+    assert r.status_code == 200, r.text
+    assert r.json()["runtime"] == "claude"
+    assert r.json()["source"] == "unsupported"
+    assert r.json()["skills"] == []
+    refresh.assert_not_awaited()
 
 
 def test_send_text_invokes_session_manager(

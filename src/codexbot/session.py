@@ -23,6 +23,7 @@ import aiofiles
 
 from .config import config
 from .runtimes import get_runtime
+from .skill_hints import skill_hint_registry
 from .slash_commands import slash_command_registry
 from .tmux_manager import tmux_manager
 from .transcript_parser import PendingToolInfo, TranscriptParser
@@ -440,6 +441,40 @@ class SessionManager:
             transcript_path=transcript_path,
         )
 
+    async def schedule_skill_hint_discovery(self, window_id: str) -> None:
+        """Schedule one-shot Codex skill hint discovery for a ready window."""
+        state = self.get_window_state(window_id)
+        if not state.session_id:
+            return
+        await self._refresh_sessions_index(force=True)
+        transcript_path = self._session_index.get(state.session_id)
+        skill_hint_registry.schedule_discovery(
+            runtime=state.runtime,
+            window_id=window_id,
+            session_id=state.session_id,
+            transcript_path=transcript_path,
+        )
+
+    async def schedule_hint_discovery(self, window_id: str) -> None:
+        """Schedule all composer-hint discovery for a ready window."""
+        state = self.get_window_state(window_id)
+        if not state.session_id:
+            return
+        await self._refresh_sessions_index(force=True)
+        transcript_path = self._session_index.get(state.session_id)
+        slash_command_registry.schedule_discovery(
+            runtime=state.runtime,
+            window_id=window_id,
+            session_id=state.session_id,
+            transcript_path=transcript_path,
+        )
+        skill_hint_registry.schedule_discovery(
+            runtime=state.runtime,
+            window_id=window_id,
+            session_id=state.session_id,
+            transcript_path=transcript_path,
+        )
+
     def mark_window_for_new_session(
         self,
         window_id: str,
@@ -568,11 +603,11 @@ class SessionManager:
                     old_sid,
                     fresh_sid,
                 )
-                await self.schedule_slash_command_discovery(window_id)
+                await self.schedule_hint_discovery(window_id)
             elif fresh_sid and not state.session_id:
                 state.session_id = fresh_sid
                 self._save_state()
-                await self.schedule_slash_command_discovery(window_id)
+                await self.schedule_hint_discovery(window_id)
 
             if state.session_id and state.cwd:
                 await self._refresh_sessions_index(force=True)
@@ -603,7 +638,7 @@ class SessionManager:
                 state.session_id = fresh_sid
                 self._clear_pending_window_rebind(window_id)
                 self._save_state()
-                await self.schedule_slash_command_discovery(window_id)
+                await self.schedule_hint_discovery(window_id)
                 return state.session_id
 
             if suppress_cwd_fallback:
@@ -618,7 +653,7 @@ class SessionManager:
                     state.session_id = fallback_sid
                     self._clear_pending_window_rebind(window_id)
                     self._save_state()
-                    await self.schedule_slash_command_discovery(window_id)
+                    await self.schedule_hint_discovery(window_id)
                     return state.session_id
             return None
 
@@ -660,7 +695,7 @@ class SessionManager:
                 old_sid,
                 replacement_sid,
             )
-            await self.schedule_slash_command_discovery(window_id)
+            await self.schedule_hint_discovery(window_id)
         elif pending_new_session or transcript is None:
             logger.info(
                 "window_session_refresh_no_change window_id=%s session_id=%s pending=%s transcript_missing=%s",

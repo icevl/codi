@@ -22,6 +22,7 @@ Endpoints (all under `/api` unless stated):
   GET  /api/resume-sessions?cwd=…    list resumable runtime sessions
   GET  /api/runtimes                 list available runtimes
   GET  /api/skills?runtime=…         skill names for runtime
+  GET  /api/skill-hints?runtime=…    cached `$` skill composer hints
   WS   /api/ws                       server→client event stream
 
 Static assets (the built React app) are served from `web-ui/dist/` if present.
@@ -58,6 +59,7 @@ from pydantic import BaseModel, Field
 from ..config import config
 from ..runtimes import all_runtimes, get_runtime
 from ..session import session_manager
+from ..skill_hints import skill_hint_registry
 from ..slash_commands import slash_command_registry
 from ..skills import discover_skills
 from ..tmux_manager import tmux_manager
@@ -654,7 +656,7 @@ def create_app(
                 ws.session_id = req.resume_session_id
                 session_manager._save_state()
 
-        await session_manager.schedule_slash_command_discovery(wid)
+        await session_manager.schedule_hint_discovery(wid)
 
         # Mirror to Telegram (best-effort — tmux session is fine even if
         # the forum topic can't be created).
@@ -1159,6 +1161,44 @@ def create_app(
     ) -> dict[str, Any]:
         names = discover_skills(runtime)
         return {"skills": names, "runtime": runtime}
+
+    @app.get("/api/skill-hints")
+    async def skill_hints(
+        runtime: str | None = Query(None),
+        window_id: str | None = Query(None),
+        _user: str = Depends(require_auth),
+    ) -> dict[str, Any]:
+        runtime_name = runtime
+        session_id: str | None = None
+        transcript_path: Path | None = None
+        if window_id:
+            state = session_manager.get_window_state(window_id)
+            runtime_name = state.runtime or runtime_name
+            session_id = state.session_id or None
+            if session_id and runtime_name == "codex":
+                await session_manager._refresh_sessions_index(force=True)
+                transcript_path = session_manager._session_index.get(session_id)
+
+        if (
+            window_id
+            and session_id
+            and runtime_name == "codex"
+            and not skill_hint_registry.has_session_hints(session_id)
+        ):
+            hint_set = await skill_hint_registry.discover_now(
+                runtime=runtime_name,
+                window_id=window_id,
+                session_id=session_id,
+                transcript_path=transcript_path,
+                publish=False,
+            )
+        else:
+            hint_set = skill_hint_registry.get_hints(
+                runtime_name,
+                window_id=window_id,
+                session_id=session_id,
+            )
+        return hint_set.to_response()
 
     @app.get("/api/slash-commands")
     async def slash_commands(

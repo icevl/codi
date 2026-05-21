@@ -22,6 +22,7 @@ import uvicorn
 
 from ..config import config
 from ..session_monitor import NewMessage, SessionMonitor
+from ..skill_hints import skill_hint_registry
 from ..slash_commands import slash_command_registry
 from .api import create_app
 from .events import EventBus, session_monitor_listener
@@ -89,6 +90,7 @@ async def start_web_server(
 
     bus = EventBus()
     slash_command_registry.set_event_publisher(bus.publish)
+    skill_hint_registry.set_event_publisher(bus.publish)
 
     if monitor is not None:
 
@@ -175,6 +177,7 @@ async def stop_web_server(monitor: SessionMonitor | None = None) -> None:
     if monitor is not None and handle.listener is not None:
         monitor.remove_listener(handle.listener)
     slash_command_registry.set_event_publisher(None)
+    skill_hint_registry.set_event_publisher(None)
     await handle.bus.close()
     if handle.stream_task is not None:
         handle.stream_task.cancel()
