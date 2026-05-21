@@ -1307,6 +1307,19 @@ export function ChatView({
     };
   }, [scheduleBottomSnap]);
 
+  useEffect(() => {
+    const timer = window.setTimeout(snapChatToBottomAfterResize, 1000);
+    return () => window.clearTimeout(timer);
+  }, [diffOpen, officeOpen, termOpen]);
+
+  function snapChatToBottomAfterResize() {
+    const s = scrollerRef.current;
+    if (!s) return;
+    s.scrollTo({ top: s.scrollHeight, behavior: "auto" });
+    stickToBottomRef.current = true;
+    setAtBottom(true);
+  }
+
   // Top sentinel fires loadOlder as it slides into the overscan band.
   useEffect(() => {
     if (!hasMore) return;
@@ -2209,6 +2222,11 @@ export function ChatView({
           ref={textareaRef}
           value={text}
           placeholder="Send a message — Enter to send, Shift+Enter for newline. Paste or drop images to attach."
+          name="chat-message"
+          autoComplete="off"
+          data-1p-ignore="true"
+          data-lpignore="true"
+          data-bwignore="true"
           aria-controls={showSlashHints ? "slash-command-hints" : undefined}
           aria-expanded={showSlashHints}
           aria-autocomplete="list"

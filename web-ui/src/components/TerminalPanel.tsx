@@ -146,7 +146,6 @@ export function TerminalPanel({ windowId, open, onClose }: Props) {
     if (ws?.readyState !== WebSocket.OPEN) return;
     try {
       ws.send(encoderRef.current.encode(data));
-      termRef.current?.focus();
     } catch {
       // ignore dropped input while reconnecting
     }
@@ -219,7 +218,6 @@ export function TerminalPanel({ windowId, open, onClose }: Props) {
       attemptsRef.current = 0;
       setStatus("open");
       sendResize();
-      term.focus();
     };
     ws.onmessage = (ev) => {
       if (typeof ev.data === "string") return;
@@ -386,7 +384,10 @@ export function TerminalPanel({ windowId, open, onClose }: Props) {
                     aria-label={button.title}
                     disabled={status !== "open"}
                     onPointerDown={(e) => e.preventDefault()}
-                    onClick={() => sendTerminalData(button.data)}
+                    onClick={() => {
+                      sendTerminalData(button.data);
+                      termRef.current?.focus();
+                    }}
                   >
                     {button.label}
                   </button>
